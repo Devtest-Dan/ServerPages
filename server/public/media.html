@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Media Browser — ScreenCast</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .media-player video, .media-player audio {
+      max-height: 70vh;
+    }
+    .media-player img {
+      max-width: 100%;
+      max-height: 80vh;
+      border-radius: 8px;
+      display: block;
+      object-fit: contain;
+      background: #111;
+    }
+    .back-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+    .back-link:hover { text-decoration: underline; }
+    .file-icon.image { background: #3d1b3d; color: #ce93d8; }
+    .thumb-preview {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>ScreenCast</h1>
+    <span class="status-dot" id="statusDot"></span>
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/live.html">Live</a>
+      <a href="/media.html" class="active">Media</a>
+    </nav>
+  </div>
+
+  <div class="container">
+    <!-- Player view (hidden by default) -->
+    <div id="playerView" style="display:none">
+      <a href="#" class="back-link" id="backToList">&larr; Back to files</a>
+      <div class="media-player">
+        <video id="videoPlayer" controls playsinline style="display:none"></video>
+        <audio id="audioPlayer" controls style="display:none"></audio>
+        <img id="imagePlayer" style="display:none" alt="">
+        <div class="media-player-info">
+          <h2 id="playerTitle"></h2>
+          <a id="downloadBtn" class="btn btn-accent" href="#" download>Download</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- File browser view -->
+    <div id="browserView">
+      <div class="drive-selector">
+        <button class="drive-btn" data-drive="C:/" id="driveC">C: Drive</button>
+        <button class="drive-btn" data-drive="D:/" id="driveD">D: Drive</button>
+      </div>
+
+      <div class="breadcrumb" id="breadcrumb"></div>
+
+      <div id="fileList" class="file-list">
+        <div class="loading">Loading files</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentDir = 'C:/';
+
+    // Parse URL params
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('dir')) currentDir = params.get('dir');
+    if (params.get('play')) {
+      showPlayer(params.get('play'), params.get('type') || 'video', params.get('name') || '');
+    }
+
+    // Drive buttons
+    document.querySelectorAll('.drive-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentDir = btn.dataset.drive;
+        loadDir(currentDir);
+      });
+    });
+
+    // Status dot
+    async function checkStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        document.getElementById('statusDot').classList.toggle('live', data.streamReady);
+      } catch (e) {}
+    }
+    checkStatus();
+    setInterval(checkStatus, 10000);
+
+    // Load directory
+    async function loadDir(dir) {
+      currentDir = dir;
+      updateDriveButtons();
+      updateURL();
+
+      const listEl = document.getElementById('fileList');
+      listEl.innerHTML = '<div class="loading">Loading files</div>';
+
+      try {
+        const res = await fetch(`/api/files?dir=${encodeURIComponent(dir)}`);
+        const data = await res.json();
+
+        if (data.error) {
+          listEl.innerHTML = `<div class="empty-state">${data.error}</div>`;
+          return;
+        }
+
+        buildBreadcrumb(data.currentDir);
+        let html = '';
+
+        // Parent directory
+        if (data.parent) {
+          html += `
+            <div class="file-item" onclick="loadDir('${escapeAttr(data.parent)}')">
+              <div class="file-icon dir">..</div>
+              <div class="file-info">
+                <div class="file-name">Parent Directory</div>
+              </div>
+            </div>`;
+        }
+
+        // Directories
+        for (const d of data.dirs) {
+          html += `
+            <div class="file-item" onclick="loadDir('${escapeAttr(d.path)}')">
+              <div class="file-icon dir">&#128193;</div>
+              <div class="file-info">
+                <div class="file-name">${escapeHtml(d.name)}</div>
+              </div>
+            </div>`;
+        }
+
+        // Files
+        for (const f of data.files) {
+          const icons = { video: '&#127909;', audio: '&#127925;', image: '&#128247;' };
+          const icon = icons[f.type] || '&#128196;';
+          const iconClass = f.type;
+          // For images, show a small thumbnail instead of icon
+          const iconHtml = f.type === 'image'
+            ? `<img class="thumb-preview" src="/api/stream?path=${encodeURIComponent(f.path)}" loading="lazy" alt="">`
+            : `<div class="file-icon ${iconClass}">${icon}</div>`;
+          html += `
+            <div class="file-item" onclick="playFile('${escapeAttr(f.path)}', '${f.type}', '${escapeAttr(f.name)}')">
+              ${iconHtml}
+              <div class="file-info">
+                <div class="file-name">${escapeHtml(f.name)}</div>
+                <div class="file-meta">${formatSize(f.size)}</div>
+              </div>
+              <div class="file-actions">
+                <a class="btn" href="/api/download?path=${encodeURIComponent(f.path)}" onclick="event.stopPropagation()">Download</a>
+              </div>
+            </div>`;
+        }
+
+        if (data.dirs.length === 0 && data.files.length === 0) {
+          html = '<div class="empty-state">No media files in this directory</div>';
+        }
+
+        listEl.innerHTML = html;
+      } catch (e) {
+        listEl.innerHTML = `<div class="empty-state">Error: ${e.message}</div>`;
+      }
+    }
+
+    function playFile(path, type, name) {
+      showPlayer(path, type, name);
+      updateURL(path, type, name);
+    }
+
+    function showPlayer(filePath, type, name) {
+      document.getElementById('browserView').style.display = 'none';
+      document.getElementById('playerView').style.display = '';
+
+      const videoEl = document.getElementById('videoPlayer');
+      const audioEl = document.getElementById('audioPlayer');
+      const imageEl = document.getElementById('imagePlayer');
+      const streamUrl = `/api/stream?path=${encodeURIComponent(filePath)}`;
+
+      document.getElementById('playerTitle').textContent = name || filePath.split(/[/\\]/).pop();
+      document.getElementById('downloadBtn').href = `/api/download?path=${encodeURIComponent(filePath)}`;
+
+      // Hide all players first
+      videoEl.style.display = 'none';
+      audioEl.style.display = 'none';
+      imageEl.style.display = 'none';
+
+      if (type === 'video') {
+        videoEl.style.display = '';
+        videoEl.src = streamUrl;
+        videoEl.play().catch(() => {});
+      } else if (type === 'image') {
+        imageEl.style.display = '';
+        imageEl.src = streamUrl;
+      } else {
+        audioEl.style.display = '';
+        audioEl.src = streamUrl;
+        audioEl.play().catch(() => {});
+      }
+
+      document.getElementById('backToList').onclick = (e) => {
+        e.preventDefault();
+        hidePlayer();
+        videoEl.pause(); videoEl.removeAttribute('src');
+        audioEl.pause(); audioEl.removeAttribute('src');
+        imageEl.removeAttribute('src');
+      };
+    }
+
+    function hidePlayer() {
+      document.getElementById('playerView').style.display = 'none';
+      document.getElementById('browserView').style.display = '';
+      // Remove play params from URL
+      const url = new URL(window.location);
+      url.searchParams.delete('play');
+      url.searchParams.delete('type');
+      url.searchParams.delete('name');
+      url.searchParams.set('dir', currentDir);
+      history.replaceState(null, '', url);
+    }
+
+    function updateURL(playPath, playType, playName) {
+      const url = new URL(window.location);
+      url.searchParams.set('dir', currentDir);
+      if (playPath) {
+        url.searchParams.set('play', playPath);
+        url.searchParams.set('type', playType);
+        url.searchParams.set('name', playName);
+      } else {
+        url.searchParams.delete('play');
+        url.searchParams.delete('type');
+        url.searchParams.delete('name');
+      }
+      history.replaceState(null, '', url);
+    }
+
+    function updateDriveButtons() {
+      document.getElementById('driveC').classList.toggle('active', currentDir.startsWith('C'));
+      document.getElementById('driveD').classList.toggle('active', currentDir.startsWith('D'));
+    }
+
+    function buildBreadcrumb(dirPath) {
+      const el = document.getElementById('breadcrumb');
+      // Normalize to forward slashes
+      const normalized = dirPath.replace(/\\/g, '/');
+      const parts = normalized.split('/').filter(Boolean);
+
+      let html = '';
+      let cumulative = '';
+
+      for (let i = 0; i < parts.length; i++) {
+        cumulative += parts[i] + '/';
+        if (i < parts.length - 1) {
+          html += `<a href="#" onclick="loadDir('${escapeAttr(cumulative)}'); return false;">${escapeHtml(parts[i])}</a><span>/</span>`;
+        } else {
+          html += `<span style="color:var(--text)">${escapeHtml(parts[i])}</span>`;
+        }
+      }
+
+      el.innerHTML = html;
+    }
+
+    // Utilities
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function escapeAttr(str) {
+      return str.replace(/\\/g, '/').replace(/'/g, "\\'");
+    }
+
+    // Initial load
+    if (!params.get('play')) {
+      loadDir(currentDir);
+    } else {
+      // Also load the directory in background for back navigation
+      loadDir(currentDir);
+    }
+  </script>
+</body>
+</html>
