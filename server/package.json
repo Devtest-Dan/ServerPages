@@ -1,5 +1,5 @@
 {
-  "name": "screencast",
+  "name": "serverpages",
   "version": "1.0.0",
   "description": "Silent screen broadcaster + media file server",
   "main": "server.js",

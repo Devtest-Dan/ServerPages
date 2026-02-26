@@ -1,8 +1,8 @@
 @echo off
-title ScreenCast - Starting...
+title ServerPages - Starting...
 cd /d "%~dp0"
 
-echo Starting ScreenCast...
+echo Starting ServerPages...
 echo.
 
 :: Check for node
@@ -28,9 +28,9 @@ if not exist "server\node_modules" (
 )
 
 :: Start the server (hidden via start /min)
-start /min "ScreenCast" node "D:\ScreenCast\server\server.js"
+start /min "ServerPages" node "D:\ServerPages\server\server.js"
 
-echo ScreenCast started!
+echo ServerPages started!
 echo.
 echo   Local:  http://localhost:3333
 echo.

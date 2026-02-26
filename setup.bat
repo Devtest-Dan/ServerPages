@@ -1,10 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
-title ScreenCast Setup
+title ServerPages Setup
 cd /d "%~dp0"
 
 echo ============================================
-echo   ScreenCast - One-Time Setup
+echo   ServerPages - One-Time Setup
 echo ============================================
 echo.
 
@@ -25,8 +25,8 @@ if exist "bin\ffmpeg.exe" (
     echo       This may take a minute (~80MB^)...
 
     set "FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
-    set "FFMPEG_ZIP=%TEMP%\ffmpeg-screencast.zip"
-    set "FFMPEG_EXTRACT=%TEMP%\ffmpeg-screencast-extract"
+    set "FFMPEG_ZIP=%TEMP%\ffmpeg-serverpages.zip"
+    set "FFMPEG_EXTRACT=%TEMP%\ffmpeg-serverpages-extract"
 
     :: Download using PowerShell
     powershell -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%FFMPEG_URL%' -OutFile '%FFMPEG_ZIP%' }" 2>nul
@@ -35,7 +35,7 @@ if exist "bin\ffmpeg.exe" (
         echo       ERROR: Download failed. Please download FFmpeg manually:
         echo       1. Go to https://github.com/BtbN/FFmpeg-Builds/releases
         echo       2. Download ffmpeg-master-latest-win64-gpl.zip
-        echo       3. Extract ffmpeg.exe to D:\ScreenCast\bin\
+        echo       3. Extract ffmpeg.exe to D:\ServerPages\bin\
         goto :npm_install
     )
 
@@ -83,7 +83,7 @@ echo.
 echo [4/5] Configuring Task Scheduler (auto-restart)...
 
 :: Delete existing task if present
-schtasks /delete /tn "ScreenCast" /f >nul 2>&1
+schtasks /delete /tn "ServerPages" /f >nul 2>&1
 
 :: Find node.exe path
 for /f "tokens=*" %%i in ('where node 2^>nul') do set "NODE_PATH=%%i"
@@ -95,13 +95,13 @@ if "!NODE_PATH!"=="" (
 
 :: Create scheduled task
 :: Runs at logon, restarts on failure every 10 seconds, up to 999 times
-schtasks /create /tn "ScreenCast" /tr "\"!NODE_PATH!\" \"D:\ScreenCast\server\server.js\"" /sc onlogon /rl limited /f >nul 2>&1
+schtasks /create /tn "ServerPages" /tr "\"!NODE_PATH!\" \"D:\ServerPages\server\server.js\"" /sc onlogon /rl limited /f >nul 2>&1
 
 if errorlevel 1 (
     echo       WARNING: Could not create scheduled task.
     echo       You may need to run this script as Administrator.
 ) else (
-    echo       Task "ScreenCast" created (runs at logon).
+    echo       Task "ServerPages" created (runs at logon).
 
     :: Configure restart-on-failure via XML import for advanced settings
     echo       Configuring restart-on-failure...
@@ -111,7 +111,7 @@ if errorlevel 1 (
     echo ^<?xml version="1.0" encoding="UTF-16"?^>
     echo ^<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"^>
     echo   ^<RegistrationInfo^>
-    echo     ^<Description^>ScreenCast - Screen broadcaster and media server^</Description^>
+    echo     ^<Description^>ServerPages - Screen broadcaster and media server^</Description^>
     echo   ^</RegistrationInfo^>
     echo   ^<Triggers^>
     echo     ^<LogonTrigger^>
@@ -133,8 +133,8 @@ if errorlevel 1 (
     echo   ^<Actions^>
     echo     ^<Exec^>
     echo       ^<Command^>!NODE_PATH!^</Command^>
-    echo       ^<Arguments^>"D:\ScreenCast\server\server.js"^</Arguments^>
-    echo       ^<WorkingDirectory^>D:\ScreenCast\server^</WorkingDirectory^>
+    echo       ^<Arguments^>"D:\ServerPages\server\server.js"^</Arguments^>
+    echo       ^<WorkingDirectory^>D:\ServerPages\server^</WorkingDirectory^>
     echo     ^</Exec^>
     echo   ^</Actions^>
     echo   ^<Principals^>
@@ -144,15 +144,15 @@ if errorlevel 1 (
     echo     ^</Principal^>
     echo   ^</Principals^>
     echo ^</Task^>
-    ) > "%TEMP%\screencast-task.xml"
+    ) > "%TEMP%\serverpages-task.xml"
 
-    schtasks /create /tn "ScreenCast" /xml "%TEMP%\screencast-task.xml" /f >nul 2>&1
+    schtasks /create /tn "ServerPages" /xml "%TEMP%\serverpages-task.xml" /f >nul 2>&1
     if errorlevel 1 (
         echo       WARNING: Advanced settings failed. Basic task still works.
     ) else (
         echo       Restart-on-failure configured (10s interval, 999 attempts).
     )
-    del /f /q "%TEMP%\screencast-task.xml" 2>nul
+    del /f /q "%TEMP%\serverpages-task.xml" 2>nul
 )
 echo.
 
@@ -170,7 +170,7 @@ if errorlevel 1 (
     echo       This gives you a free HTTPS URL accessible from anywhere.
 ) else (
     echo       Tailscale is installed.
-    echo       To expose ScreenCast to the internet, run:
+    echo       To expose ServerPages to the internet, run:
     echo         tailscale funnel 3333
     echo       This gives you a stable HTTPS URL like:
     echo         https://your-machine.tailXXXXX.ts.net

@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-title ScreenCast - Full Installer
+title ServerPages - Full Installer
 
 :: ── Self-elevate to Administrator ────────────────────────────────────────────
 net session >nul 2>&1
@@ -10,11 +10,11 @@ if errorlevel 1 (
     exit /b
 )
 
-set "INSTALL_DIR=D:\ScreenCast"
+set "INSTALL_DIR=D:\ServerPages"
 
 echo.
 echo ============================================
-echo   ScreenCast - One-Click Installer
+echo   ServerPages - One-Click Installer
 echo ============================================
 echo.
 echo   This will:
@@ -96,7 +96,7 @@ if exist "%INSTALL_DIR%\server\server.js" (
     cd /d "%INSTALL_DIR%"
     git pull >nul 2>&1
 ) else (
-    git clone https://github.com/Devtest-Dan/ScreenCast.git "%INSTALL_DIR%" >nul 2>&1
+    git clone https://github.com/Devtest-Dan/ServerPages.git "%INSTALL_DIR%" >nul 2>&1
     if errorlevel 1 (
         echo       ERROR: Clone failed. Check your internet connection.
         pause
@@ -119,8 +119,8 @@ if exist "bin\ffmpeg.exe" (
     echo [4/7] Downloading FFmpeg (~80MB, may take a minute^)...
 
     set "FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
-    set "FFMPEG_ZIP=%TEMP%\ffmpeg-screencast.zip"
-    set "FFMPEG_EXTRACT=%TEMP%\ffmpeg-screencast-extract"
+    set "FFMPEG_ZIP=%TEMP%\ffmpeg-serverpages.zip"
+    set "FFMPEG_EXTRACT=%TEMP%\ffmpeg-serverpages-extract"
 
     powershell -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '!FFMPEG_URL!' -OutFile '!FFMPEG_ZIP!' }" 2>nul
 
@@ -170,7 +170,7 @@ echo       Done.
 echo.
 echo [6/7] Configuring Task Scheduler (all-user auto-start)...
 
-schtasks /delete /tn "ScreenCast" /f >nul 2>&1
+schtasks /delete /tn "ServerPages" /f >nul 2>&1
 
 for /f "tokens=*" %%i in ('where node 2^>nul') do set "NODE_PATH=%%i"
 
@@ -183,7 +183,7 @@ if "!NODE_PATH!"=="" (
 echo ^<?xml version="1.0" encoding="UTF-16"?^>
 echo ^<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"^>
 echo   ^<RegistrationInfo^>
-echo     ^<Description^>ScreenCast - Screen broadcaster and media server^</Description^>
+echo     ^<Description^>ServerPages - Screen broadcaster and media server^</Description^>
 echo   ^</RegistrationInfo^>
 echo   ^<Triggers^>
 echo     ^<LogonTrigger^>
@@ -216,27 +216,27 @@ echo       ^<RunLevel^>LeastPrivilege^</RunLevel^>
 echo     ^</Principal^>
 echo   ^</Principals^>
 echo ^</Task^>
-) > "%TEMP%\screencast-task.xml"
+) > "%TEMP%\serverpages-task.xml"
 
-schtasks /create /tn "ScreenCast" /xml "%TEMP%\screencast-task.xml" /f >nul 2>&1
+schtasks /create /tn "ServerPages" /xml "%TEMP%\serverpages-task.xml" /f >nul 2>&1
 if errorlevel 1 (
     echo       WARNING: Task Scheduler setup failed. Server will not auto-start.
     echo       You may need to run this script as Administrator.
 ) else (
     echo       Task created (all users, restart-on-failure, hidden).
 )
-del /f /q "%TEMP%\screencast-task.xml" 2>nul
+del /f /q "%TEMP%\serverpages-task.xml" 2>nul
 
 :: ── 7. Start the server ─────────────────────────────────────────────────────
 :start_server
 echo.
-echo [7/7] Starting ScreenCast...
+echo [7/7] Starting ServerPages...
 
 :: Kill any existing instance
-taskkill /f /fi "WINDOWTITLE eq ScreenCast" >nul 2>&1
+taskkill /f /fi "WINDOWTITLE eq ServerPages" >nul 2>&1
 
 cd /d "%INSTALL_DIR%"
-start /min "ScreenCast" node "%INSTALL_DIR%\server\server.js"
+start /min "ServerPages" node "%INSTALL_DIR%\server\server.js"
 echo       Server started.
 
 echo.

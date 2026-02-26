@@ -7,7 +7,7 @@ const fs = require('fs');
 const ROOT = path.resolve(__dirname, '..');
 const FFMPEG = path.join(ROOT, 'bin', 'ffmpeg.exe');
 const STREAM_DIR = path.join(ROOT, 'stream');
-const LOG_FILE = path.join(ROOT, 'logs', 'screencast.log');
+const LOG_FILE = path.join(ROOT, 'logs', 'serverpages.log');
 const PORT = 3333;
 
 // ─── Allowed drives for media browsing ───────────────────────────────────────
@@ -383,7 +383,7 @@ setInterval(() => {
 }, 2000);
 
 // ─── Start ───────────────────────────────────────────────────────────────────
-log('=== ScreenCast starting ===');
+log('=== ServerPages starting ===');
 killOrphanedFfmpeg();
 
 app.listen(PORT, () => {

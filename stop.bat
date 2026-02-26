@@ -1,8 +1,8 @@
 @echo off
-title ScreenCast - Stopping...
+title ServerPages - Stopping...
 cd /d "%~dp0"
 
-echo Stopping ScreenCast...
+echo Stopping ServerPages...
 echo.
 
 :: Create stop flag (graceful shutdown)
@@ -16,7 +16,7 @@ timeout /t 3 /nobreak >nul
 tasklist /FI "IMAGENAME eq node.exe" /FO CSV /NH 2>nul | findstr /i "node.exe" >nul 2>&1
 if not errorlevel 1 (
     :: Only kill node processes running our server
-    for /f "tokens=2 delims=," %%i in ('wmic process where "name='node.exe' and commandline like '%%ScreenCast%%'" get processid /format:csv 2^>nul ^| findstr /r "[0-9]"') do (
+    for /f "tokens=2 delims=," %%i in ('wmic process where "name='node.exe' and commandline like '%%ServerPages%%'" get processid /format:csv 2^>nul ^| findstr /r "[0-9]"') do (
         taskkill /PID %%i /F >nul 2>&1
     )
 )
@@ -30,6 +30,6 @@ del /f /q "stream\*.ts" 2>nul
 del /f /q "stream\*.m3u8" 2>nul
 
 echo.
-echo ScreenCast stopped.
+echo ServerPages stopped.
 echo.
 timeout /t 2 >nul

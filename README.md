@@ -1,4 +1,4 @@
-# ScreenCast
+# ServerPages
 
 Silent screen broadcaster + media file server accessible over the internet.
 
@@ -15,7 +15,7 @@ Silent screen broadcaster + media file server accessible over the internet.
 node.exe (Express server on :3333)
   └── ffmpeg.exe (screen capture → HLS segments)
 
-Task Scheduler "ScreenCast" → restarts node.exe on failure
+Task Scheduler "ServerPages" → restarts node.exe on failure
 Tailscale Funnel → proxies :3333 to https://<machine>.ts.net
 ```
 
@@ -104,10 +104,10 @@ After setup, everything auto-starts on login — no manual intervention needed.
 ## File structure
 
 ```
-D:\ScreenCast\
+D:\ServerPages\
   bin/ffmpeg.exe          ← downloaded by setup.bat
   stream/                 ← HLS segments (auto-cleaned)
-  logs/screencast.log     ← app log (auto-rotated at 5MB)
+  logs/serverpages.log     ← app log (auto-rotated at 5MB)
   server/
     server.js             ← Express app + FFmpeg manager
     package.json
