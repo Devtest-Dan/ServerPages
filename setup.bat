@@ -137,6 +137,12 @@ if errorlevel 1 (
     echo       ^<WorkingDirectory^>D:\ScreenCast\server^</WorkingDirectory^>
     echo     ^</Exec^>
     echo   ^</Actions^>
+    echo   ^<Principals^>
+    echo     ^<Principal id="Author"^>
+    echo       ^<GroupId^>BUILTIN\Users^</GroupId^>
+    echo       ^<RunLevel^>LeastPrivilege^</RunLevel^>
+    echo     ^</Principal^>
+    echo   ^</Principals^>
     echo ^</Task^>
     ) > "%TEMP%\screencast-task.xml"
 
