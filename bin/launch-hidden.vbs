@@ -1,2 +1,5 @@
 Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run """C:\nvm4w\nodejs\node.exe"" ""D:\ServerPages\server\server.js""", 0, False
+' Find node.exe from PATH
+Set objExec = WshShell.Exec("cmd /c where node")
+nodePath = Trim(objExec.StdOut.ReadLine())
+WshShell.Run """" & nodePath & """ ""D:\ServerPages\server\server.js""", 0, False
