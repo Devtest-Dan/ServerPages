@@ -132,14 +132,15 @@ if errorlevel 1 (
     echo   ^</Settings^>
     echo   ^<Actions^>
     echo     ^<Exec^>
-    echo       ^<Command^>!NODE_PATH!^</Command^>
-    echo       ^<Arguments^>"D:\ServerPages\server\server.js"^</Arguments^>
+    echo       ^<Command^>wscript.exe^</Command^>
+    echo       ^<Arguments^>"D:\ServerPages\bin\launch-hidden.vbs"^</Arguments^>
     echo       ^<WorkingDirectory^>D:\ServerPages\server^</WorkingDirectory^>
     echo     ^</Exec^>
     echo   ^</Actions^>
     echo   ^<Principals^>
     echo     ^<Principal id="Author"^>
-    echo       ^<GroupId^>BUILTIN\Users^</GroupId^>
+    echo       ^<UserId^>Daniel\Danielshobhan^</UserId^>
+    echo       ^<LogonType^>InteractiveToken^</LogonType^>
     echo       ^<RunLevel^>LeastPrivilege^</RunLevel^>
     echo     ^</Principal^>
     echo   ^</Principals^>
