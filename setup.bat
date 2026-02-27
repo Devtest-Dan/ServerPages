@@ -17,16 +17,33 @@ if not exist "server\public" mkdir server\public
 echo       Done.
 echo.
 
-:: ── 2. Check Node.js ─────────────────────────────────────────────────────
+:: ── 2. Install Node.js (if missing) ──────────────────────────────────────
 echo [2/7] Checking Node.js...
 where node >nul 2>&1
 if errorlevel 1 (
-    echo       ERROR: Node.js not found.
-    echo       Download from https://nodejs.org/ and re-run setup.bat
-    pause
-    exit /b 1
+    echo       Node.js not found. Installing...
+    set "NODE_MSI=%TEMP%\node-setup.msi"
+    powershell -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi' -OutFile '!NODE_MSI!' }" 2>nul
+    if not exist "!NODE_MSI!" (
+        echo       ERROR: Download failed. Install Node.js manually from https://nodejs.org/
+        pause
+        exit /b 1
+    )
+    echo       Running installer (this may take a minute^)...
+    msiexec /i "!NODE_MSI!" /qn /norestart
+    del /f /q "!NODE_MSI!" 2>nul
+    :: Refresh PATH
+    set "PATH=%PATH%;C:\Program Files\nodejs"
+    where node >nul 2>&1
+    if errorlevel 1 (
+        echo       ERROR: Node.js install failed. Install manually from https://nodejs.org/
+        pause
+        exit /b 1
+    )
+    echo       Node.js installed.
+) else (
+    for /f "tokens=*" %%i in ('node -v 2^>nul') do echo       Found Node.js %%i
 )
-for /f "tokens=*" %%i in ('node -v 2^>nul') do echo       Found Node.js %%i
 echo.
 
 :: ── 3. Download FFmpeg ─────────────────────────────────────────────────────
@@ -146,10 +163,32 @@ echo [6/7] Configuring Tailscale...
 
 where tailscale >nul 2>&1
 if errorlevel 1 (
-    echo       Tailscale not found. Install from https://tailscale.com/download
-    echo       Then re-run setup.bat
-    pause
-    exit /b 1
+    :: Check default install location
+    if exist "C:\Program Files\Tailscale\tailscale.exe" (
+        set "PATH=%PATH%;C:\Program Files\Tailscale"
+    ) else (
+        echo       Tailscale not found. Installing...
+        set "TS_MSI=%TEMP%\tailscale-setup.msi"
+        powershell -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $r = Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/?mode=json' -UseBasicParsing | ConvertFrom-Json; $msi = ($r.exes | Where-Object { $_ -like '*amd64*.msi' } | Select-Object -First 1); Invoke-WebRequest -Uri \"https://pkgs.tailscale.com/stable/$msi\" -OutFile '!TS_MSI!' }" 2>nul
+        if not exist "!TS_MSI!" (
+            echo       ERROR: Download failed. Install Tailscale manually from https://tailscale.com/download
+            pause
+            exit /b 1
+        )
+        echo       Running installer...
+        msiexec /i "!TS_MSI!" /qn /norestart TS_UNATTENDEDMODE=always
+        del /f /q "!TS_MSI!" 2>nul
+        set "PATH=%PATH%;C:\Program Files\Tailscale"
+        :: Wait for service to start
+        timeout /t 5 /nobreak >nul
+        where tailscale >nul 2>&1
+        if errorlevel 1 (
+            echo       ERROR: Tailscale install failed. Install manually from https://tailscale.com/download
+            pause
+            exit /b 1
+        )
+        echo       Tailscale installed.
+    )
 )
 
 :: Check if logged in
