@@ -4,7 +4,7 @@ Silent screen broadcaster + media file server accessible over the internet.
 
 ## What it does
 
-- **Live screen stream** — captures your desktop at 720p30 via FFmpeg → HLS, playable in any browser
+- **Live screen stream** — captures your desktop via FFmpeg → HLS, playable in any browser (720p/1080p toggle)
 - **Media file browser** — browse and play video, audio, and image files on C: and D: drives
 - **Internet accessible** — free HTTPS URL via Tailscale Funnel, no port forwarding needed
 - **Zero interaction** — starts on any user login, runs fully hidden (no console window, no tray icon), auto-restarts if killed
@@ -27,7 +27,7 @@ Tailscale service (unattended) → Funnel proxies :3333 to https://<machine>.ts.
 | URL | Description |
 |---|---|
 | `/` | Dashboard — live stream preview + media browser link |
-| `/live.html` | Full live screen stream (HLS.js player) |
+| `/live.html` | Full live screen stream (HLS.js player, 720p/1080p toggle) |
 | `/media.html` | File browser + inline player + download |
 
 ## API
@@ -37,7 +37,8 @@ Tailscale service (unattended) → Funnel proxies :3333 to https://<machine>.ts.
 | GET | `/api/files?dir=C:/` | List directories + media files |
 | GET | `/api/stream?path=...` | Stream file (Range support for seeking) |
 | GET | `/api/download?path=...` | Download file |
-| GET | `/api/status` | Server + FFmpeg status |
+| GET | `/api/status` | Server + FFmpeg status + current quality |
+| POST | `/api/quality` | Set stream quality (`{"quality":"720p"}` or `{"quality":"1080p"}`) |
 | GET | `/hls/screen.m3u8` | Live HLS manifest |
 
 ## Supported formats
@@ -100,10 +101,10 @@ After setup, everything auto-starts on any user login — fully hidden, no manua
 
 ## Resource usage
 
-| Process | CPU | RAM |
-|---|---|---|
-| Node.js | <1% | ~40MB |
-| FFmpeg (720p30) | 5-10% | ~50MB |
+| Process | CPU (720p) | CPU (1080p) | RAM |
+|---|---|---|---|
+| Node.js | <1% | <1% | ~40MB |
+| FFmpeg | 5-10% | 10-15% | ~50MB |
 
 ## Security
 
