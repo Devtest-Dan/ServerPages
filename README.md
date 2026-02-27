@@ -47,44 +47,41 @@ Tailscale service (unattended) → Funnel proxies :3333 to https://<machine>.ts.
 - **Audio:** mp3, wav, flac, aac, ogg, wma, m4a, opus
 - **Image:** jpg, jpeg, png, gif, bmp, webp, svg, ico, tiff, tif, heic, heif, avif
 
-## Setup
+## Install
 
-### Prerequisites
-- [Node.js](https://nodejs.org/) (v18+)
-- [Tailscale](https://tailscale.com/download) (for internet access)
+### New machine (one-click)
 
-### One-time setup
+Save `install.bat` to the machine and double-click it. That's it.
+
+It downloads the repo, installs Node.js, FFmpeg, Tailscale, configures Task Scheduler, enables Funnel, hides the tray icon, and starts the server. The only manual moment is the Tailscale login browser window (first time only).
+
+### Existing machine (update)
 
 ```
 setup.bat
 ```
 
-This downloads FFmpeg, installs npm dependencies, creates a Task Scheduler entry, and prints Tailscale instructions.
+Re-run to reconfigure Task Scheduler, Tailscale, and tray icon settings.
 
-### Tailscale Funnel (internet access)
+### What setup.bat does
 
-```
-tailscale login
-tailscale set --unattended
-tailscale funnel --bg 3333
-```
+1. Installs Node.js (if missing)
+2. Downloads FFmpeg (if missing)
+3. Installs npm dependencies
+4. Creates Task Scheduler entry (any user logon, hidden, restart on failure)
+5. Configures Tailscale (login, unattended mode, Funnel on port 3333)
+6. Removes Tailscale tray icon
 
-Gives you a stable HTTPS URL like `https://<machine-name>.tailXXXXX.ts.net`.
+### Internet URL
 
-Unattended mode keeps Tailscale running even when no user is logged in. The Funnel URL uses the machine's Tailscale hostname — just replace `<machine-name>` with whatever Tailscale assigns.
+`https://<machine-name>.tailXXXXX.ts.net`
 
-### Hide Tailscale tray icon (optional)
-
-The Tailscale GUI (`tailscale-ipn.exe`) is not needed — the Windows service handles everything. To remove the tray icon:
-
-1. Delete `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\Tailscale.lnk`
-2. Kill `tailscale-ipn.exe` from Task Manager
-3. Connectivity and Funnel continue working via the Tailscale service
+Replace `<machine-name>` with whatever Tailscale assigns to the machine.
 
 ### Manual start/stop
 
 ```
-start.bat    # start in background
+start.bat    # start in background (hidden)
 stop.bat     # graceful stop
 ```
 
@@ -131,7 +128,8 @@ D:\ServerPages\
       live.html           ← Live stream player
       media.html          ← File browser + player
       style.css           ← Dark theme
-  setup.bat               ← One-time setup
+  install.bat              ← One-click installer (new machines)
+  setup.bat               ← Full setup (Node.js, FFmpeg, Tailscale, Task Scheduler)
   start.bat               ← Manual start
   stop.bat                ← Manual stop
 ```
