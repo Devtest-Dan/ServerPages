@@ -65,6 +65,13 @@ function killOrphanedFfmpeg() {
   } catch (e) { /* no ffmpeg running */ }
 }
 
+// ─── Quality presets ─────────────────────────────────────────────────────────
+const QUALITY_PRESETS = {
+  '720p':  { scale: '1280:720',  bitrate: '2000k', maxrate: '2500k', bufsize: '5000k' },
+  '1080p': { scale: '1920:1080', bitrate: '4000k', maxrate: '5000k', bufsize: '10000k' }
+};
+let currentQuality = '720p';
+
 // ─── FFmpeg management ───────────────────────────────────────────────────────
 let ffmpegProcess = null;
 let ffmpegRestarting = false;
@@ -89,18 +96,21 @@ function startFfmpeg() {
   cleanStreamDir();
   fs.mkdirSync(STREAM_DIR, { recursive: true });
 
+  const preset = QUALITY_PRESETS[currentQuality];
+  log(`Quality: ${currentQuality} (${preset.scale}, ${preset.bitrate})`);
+
   const args = [
     '-f', 'gdigrab',
     '-framerate', '30',
     '-i', 'desktop',
     '-an',
-    '-vf', 'scale=1280:720',
+    '-vf', `scale=${preset.scale}`,
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
     '-tune', 'zerolatency',
-    '-b:v', '2000k',
-    '-maxrate', '2500k',
-    '-bufsize', '5000k',
+    '-b:v', preset.bitrate,
+    '-maxrate', preset.maxrate,
+    '-bufsize', preset.bufsize,
     '-g', '60',
     '-keyint_min', '60',
     '-pix_fmt', 'yuv420p',
@@ -343,8 +353,32 @@ app.get('/api/status', (req, res) => {
     ffmpeg: ffmpegProcess !== null,
     ffmpegPid: ffmpegProcess ? ffmpegProcess.pid : null,
     uptime: process.uptime(),
-    streamReady: fs.existsSync(path.join(STREAM_DIR, 'screen.m3u8'))
+    streamReady: fs.existsSync(path.join(STREAM_DIR, 'screen.m3u8')),
+    quality: currentQuality
   });
+});
+
+// ─── API: Set quality ────────────────────────────────────────────────────────
+app.post('/api/quality', express.json(), (req, res) => {
+  const { quality } = req.body;
+  if (!QUALITY_PRESETS[quality]) {
+    return res.status(400).json({ error: 'Invalid quality. Use: ' + Object.keys(QUALITY_PRESETS).join(', ') });
+  }
+  if (quality === currentQuality) {
+    return res.json({ quality: currentQuality, changed: false });
+  }
+
+  currentQuality = quality;
+  log(`Quality changed to ${quality} — restarting FFmpeg...`);
+
+  // Kill current FFmpeg, it will auto-restart with new settings
+  if (ffmpegProcess) {
+    try { ffmpegProcess.kill('SIGTERM'); } catch (e) {}
+  } else {
+    startFfmpeg();
+  }
+
+  res.json({ quality: currentQuality, changed: true });
 });
 
 // ─── Graceful shutdown ───────────────────────────────────────────────────────

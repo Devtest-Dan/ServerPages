@@ -25,9 +25,39 @@
     .stream-info {
       margin-top: 12px;
       display: flex;
+      align-items: center;
       gap: 24px;
       font-size: 13px;
       color: var(--text-muted);
+    }
+    .quality-toggle {
+      margin-left: auto;
+      display: flex;
+      gap: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2px;
+    }
+    .quality-btn {
+      padding: 4px 12px;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .quality-btn:hover { color: var(--text); }
+    .quality-btn.active {
+      background: var(--accent);
+      color: #000;
+    }
+    .quality-btn:disabled {
+      opacity: 0.5;
+      cursor: wait;
     }
   </style>
 </head>
@@ -59,6 +89,10 @@
       <span id="resolution">—</span>
       <span id="uptime">—</span>
       <span id="status">Connecting...</span>
+      <div class="quality-toggle">
+        <button class="quality-btn" data-quality="720p" onclick="setQuality('720p')">720p</button>
+        <button class="quality-btn" data-quality="1080p" onclick="setQuality('1080p')">1080p</button>
+      </div>
     </div>
   </div>
 
@@ -144,10 +178,44 @@
           document.getElementById('uptime').textContent =
             hrs > 0 ? `Uptime: ${hrs}h ${mins % 60}m` : `Uptime: ${mins}m`;
         }
+        if (data.quality) updateQualityButtons(data.quality);
         if (data.streamReady && !hls && !video.src) {
           startStream();
         }
       } catch (e) {}
+    }
+
+    // Quality toggle
+    function updateQualityButtons(quality) {
+      document.querySelectorAll('.quality-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.quality === quality);
+      });
+    }
+
+    async function setQuality(quality) {
+      const btns = document.querySelectorAll('.quality-btn');
+      btns.forEach(b => b.disabled = true);
+
+      try {
+        const res = await fetch('/api/quality', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quality })
+        });
+        const data = await res.json();
+        updateQualityButtons(data.quality);
+
+        if (data.changed) {
+          // Stream will restart — show reconnecting state
+          overlay.classList.remove('hidden');
+          overlay.textContent = `Switching to ${quality}...`;
+          statusText.textContent = 'Switching quality...';
+          // Wait for FFmpeg to restart, then reconnect
+          setTimeout(startStream, 4000);
+        }
+      } catch (e) {}
+
+      btns.forEach(b => b.disabled = false);
     }
 
     startStream();
