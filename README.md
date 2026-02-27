@@ -7,19 +7,20 @@ Silent screen broadcaster + media file server accessible over the internet.
 - **Live screen stream** — captures your desktop at 720p30 via FFmpeg → HLS, playable in any browser
 - **Media file browser** — browse and play video, audio, and image files on C: and D: drives
 - **Internet accessible** — free HTTPS URL via Tailscale Funnel, no port forwarding needed
-- **Zero interaction** — starts on Windows login, runs hidden, auto-restarts if killed
+- **Zero interaction** — starts on any user login, runs fully hidden (no console window, no tray icon), auto-restarts if killed
 
 ## Architecture
 
 ```
-node.exe (Express server on :3333)
-  └── ffmpeg.exe (screen capture → HLS segments)
+wscript.exe → node.exe (Express server on :3333, hidden window)
+                └── ffmpeg.exe (screen capture → HLS segments)
 
-Task Scheduler "ServerPages" → restarts node.exe on failure
-Tailscale Funnel → proxies :3333 to https://<machine>.ts.net
+Task Scheduler "ServerPages" → triggers on any user logon, restarts on failure
+Tailscale service (unattended) → Funnel proxies :3333 to https://<machine>.ts.net
 ```
 
-**2 processes in Task Manager:** `node.exe` + `ffmpeg.exe`
+**2 visible processes in Task Manager:** `node.exe` + `ffmpeg.exe` (no console window)
+**Tailscale:** runs as a Windows service — no GUI, no tray icon
 
 ## Pages
 
@@ -63,10 +64,21 @@ This downloads FFmpeg, installs npm dependencies, creates a Task Scheduler entry
 
 ```
 tailscale login
+tailscale set --unattended
 tailscale funnel --bg 3333
 ```
 
-Gives you a stable HTTPS URL like `https://your-machine.tailXXXXX.ts.net`.
+Gives you a stable HTTPS URL like `https://<machine-name>.tailXXXXX.ts.net`.
+
+Unattended mode keeps Tailscale running even when no user is logged in. The Funnel URL uses the machine's Tailscale hostname — just replace `<machine-name>` with whatever Tailscale assigns.
+
+### Hide Tailscale tray icon (optional)
+
+The Tailscale GUI (`tailscale-ipn.exe`) is not needed — the Windows service handles everything. To remove the tray icon:
+
+1. Delete `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\Tailscale.lnk`
+2. Kill `tailscale-ipn.exe` from Task Manager
+3. Connectivity and Funnel continue working via the Tailscale service
 
 ### Manual start/stop
 
@@ -75,7 +87,7 @@ start.bat    # start in background
 stop.bat     # graceful stop
 ```
 
-After setup, everything auto-starts on login — no manual intervention needed.
+After setup, everything auto-starts on any user login — fully hidden, no manual intervention needed.
 
 ## Auto-restart
 
@@ -84,7 +96,7 @@ After setup, everything auto-starts on login — no manual intervention needed.
 | ffmpeg.exe killed | node.exe respawns it in <5 seconds |
 | node.exe killed | Task Scheduler restarts it in ~1 minute |
 | Both killed | Task Scheduler → node.exe → ffmpeg.exe |
-| Reboot | Task Scheduler triggers on logon |
+| Reboot | Task Scheduler triggers on any user logon |
 
 ## Resource usage
 
@@ -105,9 +117,11 @@ After setup, everything auto-starts on login — no manual intervention needed.
 
 ```
 D:\ServerPages\
-  bin/ffmpeg.exe          ← downloaded by setup.bat
+  bin/
+    ffmpeg.exe            ← downloaded by setup.bat
+    launch-hidden.vbs     ← VBS wrapper to run node.exe with no console window
   stream/                 ← HLS segments (auto-cleaned)
-  logs/serverpages.log     ← app log (auto-rotated at 5MB)
+  logs/serverpages.log    ← app log (auto-rotated at 5MB)
   server/
     server.js             ← Express app + FFmpeg manager
     package.json
