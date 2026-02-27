@@ -139,8 +139,7 @@ if errorlevel 1 (
     echo   ^</Actions^>
     echo   ^<Principals^>
     echo     ^<Principal id="Author"^>
-    echo       ^<UserId^>Daniel\Danielshobhan^</UserId^>
-    echo       ^<LogonType^>InteractiveToken^</LogonType^>
+    echo       ^<GroupId^>BUILTIN\Users^</GroupId^>
     echo       ^<RunLevel^>LeastPrivilege^</RunLevel^>
     echo     ^</Principal^>
     echo   ^</Principals^>
