@@ -17,25 +17,6 @@ if not exist "server\public" mkdir server\public
 echo       Done.
 echo.
 
-:: ── 0. Internet check ────────────────────────────────────────────────────
-echo [0/7] Testing internet connection...
-powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; try { $r = Invoke-WebRequest -Uri 'https://www.google.com' -UseBasicParsing -TimeoutSec 10; Write-Host '       OK (status:' $r.StatusCode ')' } catch { Write-Host '       FAILED:' $_.Exception.Message; exit 1 }"
-if errorlevel 1 (
-    echo.
-    echo       Trying ping instead...
-    ping -n 1 google.com >nul 2>&1
-    if errorlevel 1 (
-        echo       ERROR: No internet connection detected.
-        echo       Please check your network and try again.
-        pause
-        exit /b 1
-    ) else (
-        echo       Ping OK — PowerShell web requests may be blocked.
-        echo       Trying with -UseBasicParsing and proxy bypass...
-    )
-)
-echo.
-
 :: ── 2. Install Node.js (if missing) ──────────────────────────────────────
 echo [2/7] Checking Node.js...
 where node >nul 2>&1
