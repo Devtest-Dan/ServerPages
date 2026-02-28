@@ -41,9 +41,13 @@ echo [2/7] Checking Node.js...
 where node >nul 2>&1
 if errorlevel 1 (
     echo       Node.js not found. Installing...
-    set "NODE_MSI=%TEMP%\node-setup.msi"
-    echo       Downloading from nodejs.org...
-    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi' -OutFile '%TEMP%\node-setup.msi' -UseBasicParsing"
+    if exist "%~dp0deps\node-setup.msi" (
+        echo       Using local installer from deps\...
+        copy /y "%~dp0deps\node-setup.msi" "%TEMP%\node-setup.msi" >nul
+    ) else (
+        echo       Downloading from nodejs.org...
+        powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi' -OutFile '%TEMP%\node-setup.msi' -UseBasicParsing"
+    )
     if not exist "%TEMP%\node-setup.msi" (
         echo       ERROR: Download failed. Install Node.js manually from https://nodejs.org/
         pause
@@ -77,8 +81,13 @@ if exist "bin\ffmpeg.exe" (
     set "FFMPEG_ZIP=%TEMP%\ffmpeg-serverpages.zip"
     set "FFMPEG_EXTRACT=%TEMP%\ffmpeg-serverpages-extract"
 
-    echo       Downloading from github.com...
-    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' -OutFile '%TEMP%\ffmpeg-serverpages.zip' -UseBasicParsing"
+    if exist "%~dp0deps\ffmpeg.zip" (
+        echo       Using local installer from deps\...
+        copy /y "%~dp0deps\ffmpeg.zip" "%TEMP%\ffmpeg-serverpages.zip" >nul
+    ) else (
+        echo       Downloading from github.com...
+        powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' -OutFile '%TEMP%\ffmpeg-serverpages.zip' -UseBasicParsing"
+    )
 
     if not exist "%TEMP%\ffmpeg-serverpages.zip" (
         echo       ERROR: Download failed. Please download FFmpeg manually:
@@ -189,7 +198,12 @@ if errorlevel 1 (
         set "PATH=%PATH%;C:\Program Files\Tailscale"
     ) else (
         echo       Tailscale not found. Installing...
-        powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; $r = Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/?mode=json' -UseBasicParsing | ConvertFrom-Json; $msi = ($r.exes | Where-Object { $_ -like '*amd64*.msi' } | Select-Object -First 1); Invoke-WebRequest -Uri \"https://pkgs.tailscale.com/stable/$msi\" -OutFile '%TEMP%\tailscale-setup.msi' -UseBasicParsing"
+        if exist "%~dp0deps\tailscale-setup.msi" (
+            echo       Using local installer from deps\...
+            copy /y "%~dp0deps\tailscale-setup.msi" "%TEMP%\tailscale-setup.msi" >nul
+        ) else (
+            powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; $r = Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/?mode=json' -UseBasicParsing | ConvertFrom-Json; $msi = ($r.exes | Where-Object { $_ -like '*amd64*.msi' } | Select-Object -First 1); Invoke-WebRequest -Uri \"https://pkgs.tailscale.com/stable/$msi\" -OutFile '%TEMP%\tailscale-setup.msi' -UseBasicParsing"
+        )
         if not exist "%TEMP%\tailscale-setup.msi" (
             echo       ERROR: Download failed. Install Tailscale manually from https://tailscale.com/download
             pause
