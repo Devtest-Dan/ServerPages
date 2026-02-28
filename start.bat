@@ -28,7 +28,7 @@ if not exist "server\node_modules" (
 )
 
 :: Start the server (fully hidden via VBS launcher — no console window)
-wscript.exe "D:\ServerPages\bin\launch-hidden.vbs"
+wscript.exe "%~dp0bin\launch-hidden.vbs"
 
 echo ServerPages started!
 echo.
