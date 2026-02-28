@@ -2,6 +2,15 @@
 title ServerPages Setup
 cd /d "%~dp0"
 
+:: ── Check for admin rights ───────────────────────────────────────────────
+net session >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: Please run this script as Administrator.
+    echo Right-click setup.bat and select "Run as administrator".
+    pause
+    exit /b 1
+)
+
 echo ============================================
 echo   ServerPages - One-Time Setup
 echo ============================================
@@ -26,24 +35,24 @@ if not errorlevel 1 (
 
 echo       Node.js not found. Installing...
 
-if exist "%~dp0deps\node-setup.msi" (
-    echo       Found local installer: deps\node-setup.msi
-    copy /y "%~dp0deps\node-setup.msi" "%TEMP%\node-setup.msi" >nul
-    goto :node_install
+if exist "deps\node-setup.msi" (
+    echo       Installing from deps\node-setup.msi...
+    msiexec /i "%~dp0deps\node-setup.msi" /qn /norestart
+    goto :node_verify
 )
 
-echo       Downloading from nodejs.org...
+echo       No local installer. Downloading from nodejs.org...
 powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi' -OutFile '%TEMP%\node-setup.msi' -UseBasicParsing"
-
-:node_install
 if not exist "%TEMP%\node-setup.msi" (
-    echo       ERROR: No installer found. Install Node.js manually from https://nodejs.org/
+    echo       ERROR: Download failed. Install Node.js manually from https://nodejs.org/
     pause
     exit /b 1
 )
 echo       Running installer (this may take a minute)...
 msiexec /i "%TEMP%\node-setup.msi" /qn /norestart
 del /f /q "%TEMP%\node-setup.msi" 2>nul
+
+:node_verify
 set "PATH=%PATH%;C:\Program Files\nodejs"
 where node >nul 2>&1
 if errorlevel 1 (
