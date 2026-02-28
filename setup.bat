@@ -23,15 +23,15 @@ where node >nul 2>&1
 if errorlevel 1 (
     echo       Node.js not found. Installing...
     set "NODE_MSI=%TEMP%\node-setup.msi"
-    powershell -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi' -OutFile '!NODE_MSI!' }" 2>nul
-    if not exist "!NODE_MSI!" (
+    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi' -OutFile '%TEMP%\node-setup.msi'"
+    if not exist "%TEMP%\node-setup.msi" (
         echo       ERROR: Download failed. Install Node.js manually from https://nodejs.org/
         pause
         exit /b 1
     )
     echo       Running installer (this may take a minute^)...
-    msiexec /i "!NODE_MSI!" /qn /norestart
-    del /f /q "!NODE_MSI!" 2>nul
+    msiexec /i "%TEMP%\node-setup.msi" /qn /norestart
+    del /f /q "%TEMP%\node-setup.msi" 2>nul
     :: Refresh PATH
     set "PATH=%PATH%;C:\Program Files\nodejs"
     where node >nul 2>&1
@@ -57,9 +57,9 @@ if exist "bin\ffmpeg.exe" (
     set "FFMPEG_ZIP=%TEMP%\ffmpeg-serverpages.zip"
     set "FFMPEG_EXTRACT=%TEMP%\ffmpeg-serverpages-extract"
 
-    powershell -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%FFMPEG_URL%' -OutFile '%FFMPEG_ZIP%' }" 2>nul
+    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' -OutFile '%TEMP%\ffmpeg-serverpages.zip'"
 
-    if not exist "!FFMPEG_ZIP!" (
+    if not exist "%TEMP%\ffmpeg-serverpages.zip" (
         echo       ERROR: Download failed. Please download FFmpeg manually:
         echo       1. Go to https://github.com/BtbN/FFmpeg-Builds/releases
         echo       2. Download ffmpeg-master-latest-win64-gpl.zip
@@ -68,17 +68,17 @@ if exist "bin\ffmpeg.exe" (
     )
 
     echo       Extracting...
-    if exist "!FFMPEG_EXTRACT!" rmdir /s /q "!FFMPEG_EXTRACT!"
-    powershell -Command "& { Expand-Archive -Path '!FFMPEG_ZIP!' -DestinationPath '!FFMPEG_EXTRACT!' -Force }" 2>nul
+    if exist "%TEMP%\ffmpeg-serverpages-extract" rmdir /s /q "%TEMP%\ffmpeg-serverpages-extract"
+    powershell -Command "Expand-Archive -Path '%TEMP%\ffmpeg-serverpages.zip' -DestinationPath '%TEMP%\ffmpeg-serverpages-extract' -Force"
 
-    for /r "!FFMPEG_EXTRACT!" %%F in (ffmpeg.exe) do (
+    for /r "%TEMP%\ffmpeg-serverpages-extract" %%F in (ffmpeg.exe) do (
         copy /y "%%F" "bin\ffmpeg.exe" >nul 2>&1
         goto :ffmpeg_done
     )
 
     :ffmpeg_done
-    del /f /q "!FFMPEG_ZIP!" 2>nul
-    rmdir /s /q "!FFMPEG_EXTRACT!" 2>nul
+    del /f /q "%TEMP%\ffmpeg-serverpages.zip" 2>nul
+    rmdir /s /q "%TEMP%\ffmpeg-serverpages-extract" 2>nul
 
     if exist "bin\ffmpeg.exe" (
         echo       FFmpeg installed successfully.
@@ -168,16 +168,15 @@ if errorlevel 1 (
         set "PATH=%PATH%;C:\Program Files\Tailscale"
     ) else (
         echo       Tailscale not found. Installing...
-        set "TS_MSI=%TEMP%\tailscale-setup.msi"
-        powershell -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $r = Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/?mode=json' -UseBasicParsing | ConvertFrom-Json; $msi = ($r.exes | Where-Object { $_ -like '*amd64*.msi' } | Select-Object -First 1); Invoke-WebRequest -Uri \"https://pkgs.tailscale.com/stable/$msi\" -OutFile '!TS_MSI!' }" 2>nul
-        if not exist "!TS_MSI!" (
+        powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $r = Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/?mode=json' -UseBasicParsing | ConvertFrom-Json; $msi = ($r.exes | Where-Object { $_ -like '*amd64*.msi' } | Select-Object -First 1); Invoke-WebRequest -Uri \"https://pkgs.tailscale.com/stable/$msi\" -OutFile '%TEMP%\tailscale-setup.msi'"
+        if not exist "%TEMP%\tailscale-setup.msi" (
             echo       ERROR: Download failed. Install Tailscale manually from https://tailscale.com/download
             pause
             exit /b 1
         )
         echo       Running installer...
-        msiexec /i "!TS_MSI!" /qn /norestart TS_UNATTENDEDMODE=always
-        del /f /q "!TS_MSI!" 2>nul
+        msiexec /i "%TEMP%\tailscale-setup.msi" /qn /norestart TS_UNATTENDEDMODE=always
+        del /f /q "%TEMP%\tailscale-setup.msi" 2>nul
         set "PATH=%PATH%;C:\Program Files\Tailscale"
         :: Wait for service to start
         timeout /t 5 /nobreak >nul
