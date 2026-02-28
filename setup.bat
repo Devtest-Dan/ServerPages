@@ -17,13 +17,33 @@ if not exist "server\public" mkdir server\public
 echo       Done.
 echo.
 
+:: ── 0. Internet check ────────────────────────────────────────────────────
+echo [0/7] Testing internet connection...
+powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; try { $r = Invoke-WebRequest -Uri 'https://www.google.com' -UseBasicParsing -TimeoutSec 10; Write-Host '       OK (status:' $r.StatusCode ')' } catch { Write-Host '       FAILED:' $_.Exception.Message; exit 1 }"
+if errorlevel 1 (
+    echo.
+    echo       Trying ping instead...
+    ping -n 1 google.com >nul 2>&1
+    if errorlevel 1 (
+        echo       ERROR: No internet connection detected.
+        echo       Please check your network and try again.
+        pause
+        exit /b 1
+    ) else (
+        echo       Ping OK — PowerShell web requests may be blocked.
+        echo       Trying with -UseBasicParsing and proxy bypass...
+    )
+)
+echo.
+
 :: ── 2. Install Node.js (if missing) ──────────────────────────────────────
 echo [2/7] Checking Node.js...
 where node >nul 2>&1
 if errorlevel 1 (
     echo       Node.js not found. Installing...
     set "NODE_MSI=%TEMP%\node-setup.msi"
-    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi' -OutFile '%TEMP%\node-setup.msi'"
+    echo       Downloading from nodejs.org...
+    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi' -OutFile '%TEMP%\node-setup.msi' -UseBasicParsing"
     if not exist "%TEMP%\node-setup.msi" (
         echo       ERROR: Download failed. Install Node.js manually from https://nodejs.org/
         pause
@@ -57,7 +77,8 @@ if exist "bin\ffmpeg.exe" (
     set "FFMPEG_ZIP=%TEMP%\ffmpeg-serverpages.zip"
     set "FFMPEG_EXTRACT=%TEMP%\ffmpeg-serverpages-extract"
 
-    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' -OutFile '%TEMP%\ffmpeg-serverpages.zip'"
+    echo       Downloading from github.com...
+    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' -OutFile '%TEMP%\ffmpeg-serverpages.zip' -UseBasicParsing"
 
     if not exist "%TEMP%\ffmpeg-serverpages.zip" (
         echo       ERROR: Download failed. Please download FFmpeg manually:
@@ -168,7 +189,7 @@ if errorlevel 1 (
         set "PATH=%PATH%;C:\Program Files\Tailscale"
     ) else (
         echo       Tailscale not found. Installing...
-        powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $r = Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/?mode=json' -UseBasicParsing | ConvertFrom-Json; $msi = ($r.exes | Where-Object { $_ -like '*amd64*.msi' } | Select-Object -First 1); Invoke-WebRequest -Uri \"https://pkgs.tailscale.com/stable/$msi\" -OutFile '%TEMP%\tailscale-setup.msi'"
+        powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; $r = Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/?mode=json' -UseBasicParsing | ConvertFrom-Json; $msi = ($r.exes | Where-Object { $_ -like '*amd64*.msi' } | Select-Object -First 1); Invoke-WebRequest -Uri \"https://pkgs.tailscale.com/stable/$msi\" -OutFile '%TEMP%\tailscale-setup.msi' -UseBasicParsing"
         if not exist "%TEMP%\tailscale-setup.msi" (
             echo       ERROR: Download failed. Install Tailscale manually from https://tailscale.com/download
             pause
