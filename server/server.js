@@ -188,18 +188,17 @@ function startFfmpegWs() {
     '-an',
     '-vf', `scale=${preset.scale}`,
     '-c:v', 'libx264',
-    '-profile:v', 'baseline',
-    '-level', '3.0',
     '-preset', 'ultrafast',
     '-tune', 'zerolatency',
     '-b:v', preset.bitrate,
     '-maxrate', preset.maxrate,
     '-bufsize', preset.bufsize,
-    '-g', '60',
-    '-keyint_min', '60',
+    '-g', '30',
+    '-keyint_min', '30',
     '-pix_fmt', 'yuv420p',
     '-f', 'mp4',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+    '-frag_duration', '1000000',
     'pipe:1'
   ];
 
@@ -209,26 +208,54 @@ function startFfmpegWs() {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
-  let headerBuf = Buffer.alloc(0);
-  let headerParsed = false;
+  // MP4 box accumulator — ensures we only send complete boxes to clients
+  let pipeBuf = Buffer.alloc(0);
+  let initParsed = false;
 
   ffmpegProcess.stdout.on('data', (chunk) => {
-    if (!headerParsed) {
-      // Accumulate until we have ftyp + moov (init segment)
-      headerBuf = Buffer.concat([headerBuf, chunk]);
-      const moofOffset = findBox(headerBuf, 'moof');
-      if (moofOffset >= 0) {
-        // Everything before the first moof is the init segment
-        initSegment = Buffer.from(headerBuf.subarray(0, moofOffset));
-        const remainder = Buffer.from(headerBuf.subarray(moofOffset));
-        headerBuf = null;
-        headerParsed = true;
-        log(`[WS] Init segment cached (${initSegment.length} bytes)`);
-        // Broadcast the remainder (first moof+mdat)
-        broadcast(remainder);
+    pipeBuf = Buffer.concat([pipeBuf, chunk]);
+
+    // Extract and send complete MP4 boxes
+    while (true) {
+      if (pipeBuf.length < 8) break; // Need at least box header
+
+      // Read box size (first 4 bytes, big-endian)
+      const boxSize = pipeBuf.readUInt32BE(0);
+      if (boxSize < 8 || boxSize > 50 * 1024 * 1024) {
+        // Invalid box — something went wrong, skip a byte
+        log(`[WS] WARNING: Invalid box size ${boxSize}, resetting buffer`);
+        pipeBuf = Buffer.alloc(0);
+        break;
       }
-    } else {
-      broadcast(chunk);
+
+      if (pipeBuf.length < boxSize) break; // Incomplete box, wait for more data
+
+      // Extract complete box
+      const box = Buffer.from(pipeBuf.subarray(0, boxSize));
+      pipeBuf = Buffer.from(pipeBuf.subarray(boxSize));
+
+      const boxType = box.toString('ascii', 4, 8);
+
+      if (!initParsed) {
+        // Accumulate init segment boxes (ftyp, moov)
+        if (boxType === 'ftyp' || boxType === 'moov') {
+          initSegment = initSegment
+            ? Buffer.concat([initSegment, box])
+            : Buffer.from(box);
+          if (boxType === 'moov') {
+            initParsed = true;
+            log(`[WS] Init segment cached (${initSegment.length} bytes) [ftyp+moov]`);
+          }
+        } else if (boxType === 'moof' || boxType === 'mdat') {
+          // Got media data before moov — shouldn't happen with empty_moov
+          initParsed = true;
+          log(`[WS] Init segment cached (${initSegment ? initSegment.length : 0} bytes)`);
+          broadcast(box);
+        }
+      } else {
+        // Media data — broadcast complete box
+        broadcast(box);
+      }
     }
   });
 
@@ -242,6 +269,7 @@ function startFfmpegWs() {
   ffmpegProcess.on('close', (code) => {
     log(`FFmpeg exited with code ${code}`);
     ffmpegProcess = null;
+    pipeBuf = Buffer.alloc(0);
     if (!shuttingDown) scheduleRestart();
   });
 
@@ -252,18 +280,6 @@ function startFfmpegWs() {
   });
 
   log(`[WS] FFmpeg started (PID: ${ffmpegProcess.pid})`);
-}
-
-// Find a box type in MP4 buffer, returns byte offset or -1
-function findBox(buf, type) {
-  const tag = Buffer.from(type, 'ascii');
-  for (let i = 0; i + 8 <= buf.length; i++) {
-    if (buf[i + 4] === tag[0] && buf[i + 5] === tag[1] &&
-        buf[i + 6] === tag[2] && buf[i + 7] === tag[3]) {
-      return i;
-    }
-  }
-  return -1;
 }
 
 // Broadcast binary data to all connected WebSocket clients

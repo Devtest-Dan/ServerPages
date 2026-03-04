@@ -316,8 +316,8 @@
 
       mediaSource.addEventListener('sourceopen', () => {
         try {
-          sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-          sourceBuffer.mode = 'segments';
+          sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42C01F"');
+          sourceBuffer.mode = 'sequence';
           msReady = true;
 
           sourceBuffer.addEventListener('updateend', flushPending);
@@ -347,7 +347,10 @@
         setLive(true);
         appendBuffer(data);
 
-        // Trim buffer to ~5s
+        // Keep player at live edge
+        seekToLiveEdge();
+
+        // Trim buffer
         trimBuffer();
 
         // Track resolution
@@ -374,6 +377,14 @@
         video.play().then(() => {}).catch(() => showPlayButton());
       };
       video.addEventListener('canplay', canPlayHandler);
+    }
+
+    function seekToLiveEdge() {
+      if (!video.buffered.length) return;
+      const end = video.buffered.end(video.buffered.length - 1);
+      if (end - video.currentTime > 2) {
+        video.currentTime = Math.max(0, end - 0.5);
+      }
     }
 
     const MAX_PENDING = 30;
