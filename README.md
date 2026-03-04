@@ -42,9 +42,10 @@ Tailscale service (unattended) → Funnel proxies :3333 to https://<machine>.ts.
 
 ### WebSocket + fMP4 (Low Latency)
 - FFmpeg outputs fragmented MP4 to stdout (`pipe:1`)
-- Server parses MP4 box headers, caches init segment (ftyp+moov) for late joiners
-- Broadcasts media segments to all WebSocket clients on `/ws/stream`
-- Browser uses MediaSource Extensions (MSE) API to decode and play
+- Server parses complete MP4 boxes from the pipe (buffering until full box received), caches init segment (ftyp+moov) for late joiners
+- Broadcasts only complete MP4 boxes (moof/mdat) to all WebSocket clients on `/ws/stream`
+- Browser uses MediaSource Extensions (MSE) API with `sequence` mode to decode and play
+- Auto-seeks to live edge when player falls behind buffer
 - Buffer management: keeps ~5s, trims old data automatically
 - **Latency:** ~0.5-1 second
 - **Compatibility:** all modern desktop browsers (Chrome, Edge, Firefox, Safari 17+)
@@ -89,8 +90,9 @@ Switching restarts FFmpeg with the appropriate output format. Active WebSocket c
 | 720p | 1280x720 | 2000k | 2500k | 5000k |
 | 1080p | 1920x1080 | 4000k | 5000k | 10000k |
 
-Both modes use: `libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p`
-WS mode additionally uses: `-profile:v baseline -level 3.0` (for MSE codec compatibility)
+Both modes use: `libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p`
+HLS mode uses: `-g 60` (2s keyframes)
+WS mode uses: `-g 30 -frag_duration 1s` (1s keyframes + 1s fragments for lower latency)
 
 ## Supported Formats
 
@@ -193,7 +195,7 @@ No other runtime dependencies. FFmpeg is a standalone binary in `bin/`.
 6. On error/disconnect → exponential backoff retry (5s → 10s → 15s cap)
 
 ### Late-join (WS mode)
-When a new WebSocket client connects, the server immediately sends the cached init segment (ftyp+moov). This allows the browser's MSE decoder to initialize without waiting for the next keyframe. The client then receives live media chunks and begins playback.
+When a new WebSocket client connects, the server immediately sends the cached init segment (ftyp+moov). This allows the browser's MSE decoder to initialize without waiting for the next keyframe. The client then receives complete MP4 boxes (moof+mdat fragments) and begins playback. The player auto-seeks to the live edge to stay current.
 
 ### Buffer management (WS mode)
 - Client keeps ~5 seconds of buffered data
@@ -253,7 +255,7 @@ D:\ServerPages\
 | `startFfmpeg()` | Spawns FFmpeg in HLS mode (outputs to `stream/` directory) |
 | `startFfmpegWs()` | Spawns FFmpeg in WS mode (fMP4 to stdout pipe, broadcasts to WebSocket clients) |
 | `startCurrentMode()` | Delegates to the correct FFmpeg starter based on `streamMode` |
-| `findBox(buf, type)` | Scans MP4 buffer for a box type (e.g., `moof`) by matching 4-byte type tag at offset +4 |
+| `startFfmpegWs().pipeBuf` | Accumulates FFmpeg stdout data, parses MP4 box headers (size+type), only broadcasts complete boxes |
 | `broadcast(data)` | Sends binary data to all connected WebSocket clients |
 | `scheduleRestart()` | Restarts FFmpeg after 3 seconds if it dies unexpectedly |
 | `killOrphanedFfmpeg()` | On startup, kills any leftover ffmpeg.exe processes from previous runs |
