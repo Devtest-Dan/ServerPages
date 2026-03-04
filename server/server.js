@@ -188,6 +188,8 @@ function startFfmpegWs() {
     '-an',
     '-vf', `scale=${preset.scale}`,
     '-c:v', 'libx264',
+    '-profile:v', 'baseline',
+    '-level', '3.0',
     '-preset', 'ultrafast',
     '-tune', 'zerolatency',
     '-b:v', preset.bitrate,

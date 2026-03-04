@@ -147,6 +147,7 @@
     let mediaSource = null;
     let sourceBuffer = null;
     let pendingBuffers = [];
+    let canPlayHandler = null;
     let currentMode = 'hls';
     let retryTimeout = null;
     let retryDelay = 5000;
@@ -226,7 +227,7 @@
 
     function scheduleRetry() {
       const delay = retryDelay;
-      retryDelay = Math.min(retryDelay + 5000, MAX_RETRY_DELAY);
+      retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
       retryTimeout = setTimeout(checkAndConnect, delay);
     }
 
@@ -311,7 +312,7 @@
       video.src = URL.createObjectURL(mediaSource);
 
       let msReady = false;
-      let firstChunk = null;
+      let preOpenChunks = [];
 
       mediaSource.addEventListener('sourceopen', () => {
         try {
@@ -321,11 +322,11 @@
 
           sourceBuffer.addEventListener('updateend', flushPending);
 
-          // If we already received data before sourceopen
-          if (firstChunk) {
-            appendBuffer(firstChunk);
-            firstChunk = null;
+          // Flush any chunks received before sourceopen
+          for (const chunk of preOpenChunks) {
+            appendBuffer(chunk);
           }
+          preOpenChunks = [];
         } catch (e) {
           showOverlay('Codec not supported', false);
         }
@@ -338,7 +339,7 @@
       ws.onmessage = (evt) => {
         const data = new Uint8Array(evt.data);
         if (!msReady) {
-          firstChunk = data;
+          preOpenChunks.push(data);
           return;
         }
 
@@ -365,23 +366,31 @@
         // onclose will fire after this
       };
 
-      // Auto-play once we have data
-      video.addEventListener('canplay', function onCanPlay() {
-        video.removeEventListener('canplay', onCanPlay);
+      // Auto-play once we have data (track handler for cleanup)
+      if (canPlayHandler) video.removeEventListener('canplay', canPlayHandler);
+      canPlayHandler = function onCanPlay() {
+        video.removeEventListener('canplay', canPlayHandler);
+        canPlayHandler = null;
         video.play().then(() => {}).catch(() => showPlayButton());
-      });
+      };
+      video.addEventListener('canplay', canPlayHandler);
     }
+
+    const MAX_PENDING = 30;
 
     function appendBuffer(data) {
       if (!sourceBuffer || mediaSource.readyState !== 'open') return;
       if (sourceBuffer.updating) {
         pendingBuffers.push(data);
+        // Drop oldest frames if backpressure builds up
+        while (pendingBuffers.length > MAX_PENDING) pendingBuffers.shift();
       } else {
         try {
           sourceBuffer.appendBuffer(data);
         } catch (e) {
           // QuotaExceededError — trim and retry
           pendingBuffers.push(data);
+          while (pendingBuffers.length > MAX_PENDING) pendingBuffers.shift();
           trimBuffer(true);
         }
       }
@@ -414,6 +423,10 @@
     }
 
     function destroyWs() {
+      if (canPlayHandler) {
+        video.removeEventListener('canplay', canPlayHandler);
+        canPlayHandler = null;
+      }
       if (ws) {
         ws.onclose = null;
         ws.onerror = null;
@@ -452,6 +465,9 @@
         updateModeButtons(currentMode);
 
         if (data.changed) {
+          // Immediately tear down current player to prevent stale errors
+          destroyHls();
+          destroyWs();
           setLive(false);
           showOverlay(`Switching to ${mode === 'ws' ? 'Low Latency' : 'HLS'}...`);
           clearTimeout(retryTimeout);
