@@ -29,9 +29,9 @@
       gap: 24px;
       font-size: 13px;
       color: var(--text-muted);
+      flex-wrap: wrap;
     }
-    .quality-toggle {
-      margin-left: auto;
+    .toggle-group {
       display: flex;
       gap: 4px;
       background: var(--surface);
@@ -39,7 +39,8 @@
       border-radius: 6px;
       padding: 2px;
     }
-    .quality-btn {
+    .toggle-group.right { margin-left: auto; }
+    .toggle-btn {
       padding: 4px 12px;
       border: none;
       border-radius: 4px;
@@ -50,15 +51,40 @@
       cursor: pointer;
       transition: all 0.2s;
     }
-    .quality-btn:hover { color: var(--text); }
-    .quality-btn.active {
+    .toggle-btn:hover { color: var(--text); }
+    .toggle-btn.active {
       background: var(--accent);
       color: #000;
     }
-    .quality-btn:disabled {
+    .toggle-btn:disabled {
       opacity: 0.5;
       cursor: wait;
     }
+    .overlay-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .overlay-spinner {
+      width: 24px;
+      height: 24px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .play-btn {
+      padding: 10px 28px;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .play-btn:hover { background: var(--accent-hover); }
   </style>
 </head>
 <body>
@@ -81,7 +107,10 @@
     <div class="player-wrapper">
       <video id="player" autoplay playsinline controls></video>
       <div class="player-overlay" id="overlay">
-        Waiting for stream...
+        <div class="overlay-content">
+          <div class="overlay-spinner" id="overlaySpinner"></div>
+          <span id="overlayText">Checking stream...</span>
+        </div>
       </div>
     </div>
 
@@ -89,9 +118,15 @@
       <span id="resolution">—</span>
       <span id="uptime">—</span>
       <span id="status">Connecting...</span>
-      <div class="quality-toggle">
-        <button class="quality-btn" data-quality="720p" onclick="setQuality('720p')">720p</button>
-        <button class="quality-btn" data-quality="1080p" onclick="setQuality('1080p')">1080p</button>
+
+      <div class="toggle-group">
+        <button class="toggle-btn" data-mode="hls" onclick="switchMode('hls')">HLS</button>
+        <button class="toggle-btn" data-mode="ws" onclick="switchMode('ws')">Low Latency</button>
+      </div>
+
+      <div class="toggle-group right">
+        <button class="toggle-btn" data-quality="720p" onclick="setQuality('720p')">720p</button>
+        <button class="toggle-btn" data-quality="1080p" onclick="setQuality('1080p')">1080p</button>
       </div>
     </div>
   </div>
@@ -100,15 +135,111 @@
   <script>
     const video = document.getElementById('player');
     const overlay = document.getElementById('overlay');
+    const overlaySpinner = document.getElementById('overlaySpinner');
+    const overlayText = document.getElementById('overlayText');
     const statusDot = document.getElementById('statusDot');
     const liveBadge = document.getElementById('liveBadge');
-    const statusText = document.getElementById('status');
-    const resText = document.getElementById('resolution');
-    let hls = null;
-    let retryTimeout = null;
+    const statusEl = document.getElementById('status');
+    const resEl = document.getElementById('resolution');
 
-    function startStream() {
+    let hls = null;
+    let ws = null;
+    let mediaSource = null;
+    let sourceBuffer = null;
+    let pendingBuffers = [];
+    let currentMode = 'hls';
+    let retryTimeout = null;
+    let retryDelay = 5000;
+    const MAX_RETRY_DELAY = 15000;
+
+    // ── Overlay helpers ──────────────────────────────────────────────────────
+    function showOverlay(text, spinner = true) {
+      overlay.classList.remove('hidden');
+      overlayText.textContent = text;
+      overlaySpinner.style.display = spinner ? '' : 'none';
+      // Remove any play button
+      const btn = overlay.querySelector('.play-btn');
+      if (btn) btn.remove();
+    }
+
+    function showPlayButton() {
+      overlay.classList.remove('hidden');
+      overlaySpinner.style.display = 'none';
+      overlayText.textContent = 'Autoplay blocked';
+      if (!overlay.querySelector('.play-btn')) {
+        const btn = document.createElement('button');
+        btn.className = 'play-btn';
+        btn.textContent = 'Click to Play';
+        btn.onclick = () => {
+          video.play().then(() => hideOverlay()).catch(() => {});
+        };
+        overlay.querySelector('.overlay-content').appendChild(btn);
+      }
+    }
+
+    function hideOverlay() {
+      overlay.classList.add('hidden');
+    }
+
+    function setLive(live) {
+      statusDot.classList.toggle('live', live);
+      liveBadge.style.display = live ? '' : 'none';
+      statusEl.textContent = live ? 'Streaming' : 'Offline';
+    }
+
+    // ── Status-first check ───────────────────────────────────────────────────
+    async function checkAndConnect() {
+      clearTimeout(retryTimeout);
+      showOverlay('Checking stream...');
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+
+        updateModeButtons(data.streamMode || 'hls');
+        updateQualityButtons(data.quality);
+        currentMode = data.streamMode || 'hls';
+
+        if (data.uptime) updateUptime(data.uptime);
+
+        if (!data.ffmpeg) {
+          showOverlay('FFmpeg not running', false);
+          scheduleRetry();
+          return;
+        }
+        if (!data.streamReady) {
+          showOverlay('FFmpeg starting...');
+          scheduleRetry();
+          return;
+        }
+
+        // Stream is ready — connect
+        if (currentMode === 'ws') {
+          connectWs();
+        } else {
+          connectHls();
+        }
+      } catch (e) {
+        showOverlay('Server unreachable', false);
+        scheduleRetry();
+      }
+    }
+
+    function scheduleRetry() {
+      const delay = retryDelay;
+      retryDelay = Math.min(retryDelay + 5000, MAX_RETRY_DELAY);
+      retryTimeout = setTimeout(checkAndConnect, delay);
+    }
+
+    function resetRetry() {
+      retryDelay = 5000;
+    }
+
+    // ── HLS Player ───────────────────────────────────────────────────────────
+    function connectHls() {
+      destroyWs();
       if (hls) { hls.destroy(); hls = null; }
+
+      showOverlay('Connecting (HLS)...');
 
       if (Hls.isSupported()) {
         hls = new Hls({
@@ -122,78 +253,225 @@
         hls.attachMedia(video);
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          overlay.classList.add('hidden');
-          statusDot.classList.add('live');
-          liveBadge.style.display = '';
-          statusText.textContent = 'Streaming';
-          video.play().catch(() => {});
+          hideOverlay();
+          setLive(true);
+          resetRetry();
+          video.play().then(() => {}).catch(() => showPlayButton());
         });
 
         hls.on(Hls.Events.ERROR, (e, data) => {
           if (data.fatal) {
             hls.destroy();
             hls = null;
-            streamOffline();
+            setLive(false);
+            showOverlay('Stream offline — reconnecting...', false);
+            scheduleRetry();
           }
         });
 
-        // Track resolution
         hls.on(Hls.Events.LEVEL_LOADED, () => {
           if (video.videoWidth) {
-            resText.textContent = `${video.videoWidth}x${video.videoHeight}`;
+            resEl.textContent = `${video.videoWidth}x${video.videoHeight}`;
           }
         });
 
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = '/hls/screen.m3u8';
         video.addEventListener('loadedmetadata', () => {
-          overlay.classList.add('hidden');
-          statusDot.classList.add('live');
-          liveBadge.style.display = '';
-          statusText.textContent = 'Streaming';
-          video.play().catch(() => {});
-        });
-        video.addEventListener('error', streamOffline);
+          hideOverlay();
+          setLive(true);
+          resetRetry();
+          video.play().then(() => {}).catch(() => showPlayButton());
+        }, { once: true });
+        video.addEventListener('error', () => {
+          setLive(false);
+          showOverlay('Stream offline — reconnecting...', false);
+          scheduleRetry();
+        }, { once: true });
       }
     }
 
-    function streamOffline() {
-      overlay.classList.remove('hidden');
-      overlay.textContent = 'Stream offline — retrying in 5s...';
-      statusDot.classList.remove('live');
-      liveBadge.style.display = 'none';
-      statusText.textContent = 'Reconnecting...';
-      clearTimeout(retryTimeout);
-      retryTimeout = setTimeout(startStream, 5000);
+    // ── WebSocket + MSE Player ───────────────────────────────────────────────
+    function connectWs() {
+      destroyHls();
+      destroyWs();
+
+      showOverlay('Connecting (Low Latency)...');
+
+      if (!('MediaSource' in window)) {
+        showOverlay('MediaSource not supported in this browser', false);
+        return;
+      }
+
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${proto}//${location.host}/ws/stream`);
+      ws.binaryType = 'arraybuffer';
+
+      mediaSource = new MediaSource();
+      video.src = URL.createObjectURL(mediaSource);
+
+      let msReady = false;
+      let firstChunk = null;
+
+      mediaSource.addEventListener('sourceopen', () => {
+        try {
+          sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+          sourceBuffer.mode = 'segments';
+          msReady = true;
+
+          sourceBuffer.addEventListener('updateend', flushPending);
+
+          // If we already received data before sourceopen
+          if (firstChunk) {
+            appendBuffer(firstChunk);
+            firstChunk = null;
+          }
+        } catch (e) {
+          showOverlay('Codec not supported', false);
+        }
+      });
+
+      ws.onopen = () => {
+        resetRetry();
+      };
+
+      ws.onmessage = (evt) => {
+        const data = new Uint8Array(evt.data);
+        if (!msReady) {
+          firstChunk = data;
+          return;
+        }
+
+        hideOverlay();
+        setLive(true);
+        appendBuffer(data);
+
+        // Trim buffer to ~5s
+        trimBuffer();
+
+        // Track resolution
+        if (video.videoWidth) {
+          resEl.textContent = `${video.videoWidth}x${video.videoHeight}`;
+        }
+      };
+
+      ws.onclose = () => {
+        setLive(false);
+        showOverlay('Connection lost — reconnecting...', false);
+        scheduleRetry();
+      };
+
+      ws.onerror = () => {
+        // onclose will fire after this
+      };
+
+      // Auto-play once we have data
+      video.addEventListener('canplay', function onCanPlay() {
+        video.removeEventListener('canplay', onCanPlay);
+        video.play().then(() => {}).catch(() => showPlayButton());
+      });
     }
 
-    // Uptime display
-    async function updateStatus() {
-      try {
-        const res = await fetch('/api/status');
-        const data = await res.json();
-        if (data.uptime) {
-          const mins = Math.floor(data.uptime / 60);
-          const hrs = Math.floor(mins / 60);
-          document.getElementById('uptime').textContent =
-            hrs > 0 ? `Uptime: ${hrs}h ${mins % 60}m` : `Uptime: ${mins}m`;
+    function appendBuffer(data) {
+      if (!sourceBuffer || mediaSource.readyState !== 'open') return;
+      if (sourceBuffer.updating) {
+        pendingBuffers.push(data);
+      } else {
+        try {
+          sourceBuffer.appendBuffer(data);
+        } catch (e) {
+          // QuotaExceededError — trim and retry
+          pendingBuffers.push(data);
+          trimBuffer(true);
         }
-        if (data.quality) updateQualityButtons(data.quality);
-        if (data.streamReady && !hls && !video.src) {
-          startStream();
+      }
+    }
+
+    function flushPending() {
+      if (!sourceBuffer || sourceBuffer.updating || pendingBuffers.length === 0) return;
+      const next = pendingBuffers.shift();
+      try {
+        sourceBuffer.appendBuffer(next);
+      } catch (e) {
+        // drop frame on error
+      }
+    }
+
+    function trimBuffer(force) {
+      if (!sourceBuffer || sourceBuffer.updating || !video.buffered.length) return;
+      const end = video.buffered.end(video.buffered.length - 1);
+      const start = video.buffered.start(0);
+      if (force || end - start > 5) {
+        try {
+          sourceBuffer.remove(start, Math.max(start, end - 3));
+        } catch (e) {}
+      }
+    }
+
+    // ── Cleanup ──────────────────────────────────────────────────────────────
+    function destroyHls() {
+      if (hls) { hls.destroy(); hls = null; }
+    }
+
+    function destroyWs() {
+      if (ws) {
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.onmessage = null;
+        try { ws.close(); } catch (e) {}
+        ws = null;
+      }
+      if (mediaSource && mediaSource.readyState === 'open') {
+        try { mediaSource.endOfStream(); } catch (e) {}
+      }
+      mediaSource = null;
+      sourceBuffer = null;
+      pendingBuffers = [];
+    }
+
+    // ── Mode toggle ──────────────────────────────────────────────────────────
+    function updateModeButtons(mode) {
+      document.querySelectorAll('[data-mode]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+      });
+    }
+
+    async function switchMode(mode) {
+      if (mode === currentMode) return;
+      const btns = document.querySelectorAll('[data-mode]');
+      btns.forEach(b => b.disabled = true);
+
+      try {
+        const res = await fetch('/api/mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode })
+        });
+        const data = await res.json();
+        currentMode = data.streamMode;
+        updateModeButtons(currentMode);
+
+        if (data.changed) {
+          setLive(false);
+          showOverlay(`Switching to ${mode === 'ws' ? 'Low Latency' : 'HLS'}...`);
+          clearTimeout(retryTimeout);
+          // Give FFmpeg time to restart
+          setTimeout(checkAndConnect, 3000);
         }
       } catch (e) {}
+
+      btns.forEach(b => b.disabled = false);
     }
 
-    // Quality toggle
+    // ── Quality toggle ───────────────────────────────────────────────────────
     function updateQualityButtons(quality) {
-      document.querySelectorAll('.quality-btn').forEach(btn => {
+      document.querySelectorAll('[data-quality]').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.quality === quality);
       });
     }
 
     async function setQuality(quality) {
-      const btns = document.querySelectorAll('.quality-btn');
+      const btns = document.querySelectorAll('[data-quality]');
       btns.forEach(b => b.disabled = true);
 
       try {
@@ -206,20 +484,37 @@
         updateQualityButtons(data.quality);
 
         if (data.changed) {
-          // Stream will restart — show reconnecting state
-          overlay.classList.remove('hidden');
-          overlay.textContent = `Switching to ${quality}...`;
-          statusText.textContent = 'Switching quality...';
-          // Wait for FFmpeg to restart, then reconnect
-          setTimeout(startStream, 4000);
+          setLive(false);
+          showOverlay(`Switching to ${quality}...`);
+          clearTimeout(retryTimeout);
+          setTimeout(checkAndConnect, 4000);
         }
       } catch (e) {}
 
       btns.forEach(b => b.disabled = false);
     }
 
-    startStream();
-    setInterval(updateStatus, 10000);
+    // ── Periodic status ──────────────────────────────────────────────────────
+    function updateUptime(secs) {
+      const mins = Math.floor(secs / 60);
+      const hrs = Math.floor(mins / 60);
+      document.getElementById('uptime').textContent =
+        hrs > 0 ? `Uptime: ${hrs}h ${mins % 60}m` : `Uptime: ${mins}m`;
+    }
+
+    async function pollStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        if (data.uptime) updateUptime(data.uptime);
+        if (data.quality) updateQualityButtons(data.quality);
+        if (data.streamMode) updateModeButtons(data.streamMode);
+      } catch (e) {}
+    }
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+    checkAndConnect();
+    setInterval(pollStatus, 10000);
   </script>
 </body>
 </html>

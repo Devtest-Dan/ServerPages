@@ -24,12 +24,13 @@
         <div class="card-header">
           <span class="live-badge" id="liveBadge" style="display:none">LIVE</span>
           <h2>Screen Stream</h2>
+          <span id="modeTag" style="margin-left:auto;font-size:11px;color:var(--text-muted);text-transform:uppercase"></span>
         </div>
         <div class="card-body">
           <div class="player-wrapper">
             <video id="preview" muted autoplay playsinline></video>
             <div class="player-overlay" id="previewOverlay">
-              Connecting to stream...
+              Checking stream...
             </div>
           </div>
         </div>
@@ -58,54 +59,91 @@
 
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
   <script>
-    // Status check
+    const dot = document.getElementById('statusDot');
+    const badge = document.getElementById('liveBadge');
+    const modeTag = document.getElementById('modeTag');
+    const overlay = document.getElementById('previewOverlay');
+    const previewVideo = document.getElementById('preview');
+
+    let previewHls = null;
+    let previewActive = false;
+    let retryTimer = null;
+    let retryDelay = 5000;
+
     async function checkStatus() {
       try {
         const res = await fetch('/api/status');
         const data = await res.json();
-        const dot = document.getElementById('statusDot');
-        const badge = document.getElementById('liveBadge');
+        const mode = data.streamMode || 'hls';
 
-        if (data.streamReady) {
-          dot.classList.add('live');
-          badge.style.display = '';
-          initPreview();
-        } else {
-          dot.classList.remove('live');
-          badge.style.display = 'none';
+        modeTag.textContent = mode === 'ws' ? 'Low Latency' : 'HLS';
+
+        if (!data.ffmpeg) {
+          setOffline('FFmpeg not running');
+          return;
         }
-      } catch (e) {}
+
+        if (!data.streamReady) {
+          setOffline('FFmpeg starting...');
+          return;
+        }
+
+        // Stream ready
+        dot.classList.add('live');
+        badge.style.display = '';
+
+        if (mode === 'hls' && !previewActive) {
+          initHlsPreview();
+        } else if (mode === 'ws' && !previewActive) {
+          // In WS mode, show a static message — preview requires full MSE setup
+          overlay.textContent = 'Low Latency mode — click to watch';
+          overlay.classList.remove('hidden');
+          previewActive = true;
+        }
+      } catch (e) {
+        setOffline('Server unreachable');
+      }
     }
 
-    // Mini preview
-    let previewInit = false;
-    function initPreview() {
-      if (previewInit) return;
-      previewInit = true;
-      const video = document.getElementById('preview');
-      const overlay = document.getElementById('previewOverlay');
+    function setOffline(msg) {
+      dot.classList.remove('live');
+      badge.style.display = 'none';
+      overlay.textContent = msg;
+      overlay.classList.remove('hidden');
+      previewActive = false;
+      if (previewHls) { previewHls.destroy(); previewHls = null; }
+    }
+
+    function initHlsPreview() {
+      if (previewActive) return;
+      previewActive = true;
 
       if (Hls.isSupported()) {
-        const hls = new Hls({ liveDurationInfinity: true, enableWorker: true });
-        hls.loadSource('/hls/screen.m3u8');
-        hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        previewHls = new Hls({ liveDurationInfinity: true, enableWorker: true });
+        previewHls.loadSource('/hls/screen.m3u8');
+        previewHls.attachMedia(previewVideo);
+        previewHls.on(Hls.Events.MANIFEST_PARSED, () => {
           overlay.classList.add('hidden');
-          video.play().catch(() => {});
+          previewVideo.play().catch(() => {});
         });
-        hls.on(Hls.Events.ERROR, (e, data) => {
+        previewHls.on(Hls.Events.ERROR, (e, data) => {
           if (data.fatal) {
-            previewInit = false;
-            overlay.classList.remove('hidden');
-            overlay.textContent = 'Stream offline — retrying...';
+            previewHls.destroy();
+            previewHls = null;
+            previewActive = false;
+            setOffline('Stream offline — retrying...');
           }
         });
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = '/hls/screen.m3u8';
-        video.addEventListener('loadedmetadata', () => {
+      } else if (previewVideo.canPlayType('application/vnd.apple.mpegurl')) {
+        previewVideo.src = '/hls/screen.m3u8';
+        previewVideo.addEventListener('loadedmetadata', () => {
           overlay.classList.add('hidden');
-          video.play().catch(() => {});
-        });
+          previewVideo.play().catch(() => {});
+        }, { once: true });
+        previewVideo.addEventListener('error', () => {
+          previewActive = false;
+          setOffline('Stream offline — retrying...');
+        }, { once: true });
       }
     }
 

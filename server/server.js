@@ -2,6 +2,8 @@ const express = require('express');
 const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
+const { WebSocketServer } = require('ws');
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
 const ROOT = path.resolve(__dirname, '..');
@@ -71,6 +73,13 @@ const QUALITY_PRESETS = {
   '1080p': { scale: '1920:1080', bitrate: '4000k', maxrate: '5000k', bufsize: '10000k' }
 };
 let currentQuality = '720p';
+
+// ─── Streaming mode ─────────────────────────────────────────────────────────
+let streamMode = 'hls'; // 'hls' or 'ws'
+
+// ─── WebSocket state ────────────────────────────────────────────────────────
+let wsClients = new Set();
+let initSegment = null; // Cached ftyp+moov for late joiners
 
 // ─── FFmpeg management ───────────────────────────────────────────────────────
 let ffmpegProcess = null;
@@ -158,6 +167,121 @@ function startFfmpeg() {
   log(`FFmpeg started (PID: ${ffmpegProcess.pid})`);
 }
 
+// ─── FFmpeg WS mode (fragmented MP4 to stdout) ─────────────────────────────
+function startFfmpegWs() {
+  if (!fs.existsSync(FFMPEG)) {
+    log('ERROR: ffmpeg.exe not found at ' + FFMPEG);
+    return;
+  }
+
+  cleanStreamDir();
+  fs.mkdirSync(STREAM_DIR, { recursive: true });
+  initSegment = null;
+
+  const preset = QUALITY_PRESETS[currentQuality];
+  log(`[WS] Quality: ${currentQuality} (${preset.scale}, ${preset.bitrate})`);
+
+  const args = [
+    '-f', 'gdigrab',
+    '-framerate', '30',
+    '-i', 'desktop',
+    '-an',
+    '-vf', `scale=${preset.scale}`,
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    '-tune', 'zerolatency',
+    '-b:v', preset.bitrate,
+    '-maxrate', preset.maxrate,
+    '-bufsize', preset.bufsize,
+    '-g', '60',
+    '-keyint_min', '60',
+    '-pix_fmt', 'yuv420p',
+    '-f', 'mp4',
+    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+    'pipe:1'
+  ];
+
+  log('[WS] Starting FFmpeg (fMP4 pipe mode)...');
+  ffmpegProcess = spawn(FFMPEG, args, {
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  let headerBuf = Buffer.alloc(0);
+  let headerParsed = false;
+
+  ffmpegProcess.stdout.on('data', (chunk) => {
+    if (!headerParsed) {
+      // Accumulate until we have ftyp + moov (init segment)
+      headerBuf = Buffer.concat([headerBuf, chunk]);
+      const moofOffset = findBox(headerBuf, 'moof');
+      if (moofOffset >= 0) {
+        // Everything before the first moof is the init segment
+        initSegment = Buffer.from(headerBuf.subarray(0, moofOffset));
+        const remainder = Buffer.from(headerBuf.subarray(moofOffset));
+        headerBuf = null;
+        headerParsed = true;
+        log(`[WS] Init segment cached (${initSegment.length} bytes)`);
+        // Broadcast the remainder (first moof+mdat)
+        broadcast(remainder);
+      }
+    } else {
+      broadcast(chunk);
+    }
+  });
+
+  ffmpegProcess.stderr.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (msg && !msg.startsWith('frame=')) {
+      log(`FFmpeg: ${msg.substring(0, 200)}`);
+    }
+  });
+
+  ffmpegProcess.on('close', (code) => {
+    log(`FFmpeg exited with code ${code}`);
+    ffmpegProcess = null;
+    if (!shuttingDown) scheduleRestart();
+  });
+
+  ffmpegProcess.on('error', (err) => {
+    log(`FFmpeg error: ${err.message}`);
+    ffmpegProcess = null;
+    if (!shuttingDown) scheduleRestart();
+  });
+
+  log(`[WS] FFmpeg started (PID: ${ffmpegProcess.pid})`);
+}
+
+// Find a box type in MP4 buffer, returns byte offset or -1
+function findBox(buf, type) {
+  const tag = Buffer.from(type, 'ascii');
+  for (let i = 0; i + 8 <= buf.length; i++) {
+    if (buf[i + 4] === tag[0] && buf[i + 5] === tag[1] &&
+        buf[i + 6] === tag[2] && buf[i + 7] === tag[3]) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+// Broadcast binary data to all connected WebSocket clients
+function broadcast(data) {
+  for (const ws of wsClients) {
+    if (ws.readyState === 1) { // WebSocket.OPEN
+      ws.send(data);
+    }
+  }
+}
+
+// Start FFmpeg in current mode
+function startCurrentMode() {
+  if (streamMode === 'ws') {
+    startFfmpegWs();
+  } else {
+    startFfmpeg();
+  }
+}
+
 function scheduleRestart() {
   if (ffmpegRestarting || shuttingDown) return;
   ffmpegRestarting = true;
@@ -166,7 +290,7 @@ function scheduleRestart() {
     ffmpegRestarting = false;
     if (!shuttingDown) {
       killOrphanedFfmpeg();
-      startFfmpeg();
+      startCurrentMode();
     }
   }, 3000);
 }
@@ -349,12 +473,16 @@ app.get('/api/download', (req, res) => {
 
 // ─── API: Status ─────────────────────────────────────────────────────────────
 app.get('/api/status', (req, res) => {
+  const hlsReady = fs.existsSync(path.join(STREAM_DIR, 'screen.m3u8'));
+  const wsReady = initSegment !== null;
   res.json({
     ffmpeg: ffmpegProcess !== null,
     ffmpegPid: ffmpegProcess ? ffmpegProcess.pid : null,
     uptime: process.uptime(),
-    streamReady: fs.existsSync(path.join(STREAM_DIR, 'screen.m3u8')),
-    quality: currentQuality
+    streamReady: streamMode === 'hls' ? hlsReady : wsReady,
+    streamMode,
+    quality: currentQuality,
+    wsClients: wsClients.size
   });
 });
 
@@ -375,10 +503,34 @@ app.post('/api/quality', express.json(), (req, res) => {
   if (ffmpegProcess) {
     try { ffmpegProcess.kill('SIGTERM'); } catch (e) {}
   } else {
-    startFfmpeg();
+    startCurrentMode();
   }
 
   res.json({ quality: currentQuality, changed: true });
+});
+
+// ─── API: Switch streaming mode ─────────────────────────────────────────────
+app.post('/api/mode', express.json(), (req, res) => {
+  const { mode } = req.body;
+  if (mode !== 'hls' && mode !== 'ws') {
+    return res.status(400).json({ error: 'Invalid mode. Use: hls, ws' });
+  }
+  if (mode === streamMode) {
+    return res.json({ streamMode, changed: false });
+  }
+
+  streamMode = mode;
+  initSegment = null;
+  log(`Stream mode changed to ${mode} — restarting FFmpeg...`);
+
+  if (ffmpegProcess) {
+    try { ffmpegProcess.kill('SIGTERM'); } catch (e) {}
+    // scheduleRestart will pick up the new mode
+  } else {
+    startCurrentMode();
+  }
+
+  res.json({ streamMode, changed: true });
 });
 
 // ─── Graceful shutdown ───────────────────────────────────────────────────────
@@ -388,6 +540,12 @@ function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   log(`Received ${signal}, shutting down...`);
+
+  // Close all WebSocket clients
+  for (const ws of wsClients) {
+    try { ws.close(); } catch (e) {}
+  }
+  wsClients.clear();
 
   if (ffmpegProcess) {
     try {
@@ -420,7 +578,31 @@ setInterval(() => {
 log('=== ServerPages starting ===');
 killOrphanedFfmpeg();
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+
+// ─── WebSocket server ─────────────────────────────────────────────────────
+const wss = new WebSocketServer({ server, path: '/ws/stream' });
+
+wss.on('connection', (ws) => {
+  wsClients.add(ws);
+  log(`[WS] Client connected (total: ${wsClients.size})`);
+
+  // Send cached init segment so late joiners can start decoding
+  if (initSegment) {
+    ws.send(initSegment);
+  }
+
+  ws.on('close', () => {
+    wsClients.delete(ws);
+    log(`[WS] Client disconnected (total: ${wsClients.size})`);
+  });
+
+  ws.on('error', () => {
+    wsClients.delete(ws);
+  });
+});
+
+server.listen(PORT, () => {
   log(`Server listening on http://localhost:${PORT}`);
-  startFfmpeg();
+  startCurrentMode();
 });
