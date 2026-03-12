@@ -105,7 +105,7 @@
     </div>
 
     <div class="player-wrapper">
-      <video id="player" autoplay playsinline controls></video>
+      <video id="player" autoplay muted playsinline controls></video>
       <div class="player-overlay" id="overlay">
         <div class="overlay-content">
           <div class="overlay-spinner" id="overlaySpinner"></div>
@@ -247,7 +247,13 @@
           liveDurationInfinity: true,
           enableWorker: true,
           lowLatencyMode: true,
-          backBufferLength: 0
+          backBufferLength: 0,
+          liveSyncDurationCount: 1,
+          liveMaxLatencyDurationCount: 3,
+          maxBufferLength: 3,
+          maxMaxBufferLength: 5,
+          levelLoadingMaxRetry: 10,
+          manifestLoadingMaxRetry: 10
         });
 
         hls.loadSource('/hls/screen.m3u8');

@@ -124,8 +124,8 @@ function startFfmpeg() {
     '-keyint_min', '60',
     '-pix_fmt', 'yuv420p',
     '-f', 'hls',
-    '-hls_time', '2',
-    '-hls_list_size', '10',
+    '-hls_time', '1',
+    '-hls_list_size', '3',
     '-hls_flags', 'delete_segments+append_list',
     '-hls_segment_filename', path.join(STREAM_DIR, 'seg%03d.ts'),
     path.join(STREAM_DIR, 'screen.m3u8')
