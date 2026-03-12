@@ -125,7 +125,7 @@ function startFfmpeg() {
     '-pix_fmt', 'yuv420p',
     '-f', 'hls',
     '-hls_time', '2',
-    '-hls_list_size', '5',
+    '-hls_list_size', '10',
     '-hls_flags', 'delete_segments+append_list',
     '-hls_segment_filename', path.join(STREAM_DIR, 'seg%03d.ts'),
     path.join(STREAM_DIR, 'screen.m3u8')
@@ -549,6 +549,18 @@ app.post('/api/mode', express.json(), (req, res) => {
   }
 
   res.json({ streamMode, changed: true });
+});
+
+// ─── API: Restart FFmpeg ─────────────────────────────────────────────────────
+app.post('/api/restart', (req, res) => {
+  log('Restart requested via API');
+  if (ffmpegProcess) {
+    try { ffmpegProcess.kill('SIGTERM'); } catch (e) {}
+    // scheduleRestart will handle respawning
+  } else {
+    startCurrentMode();
+  }
+  res.json({ restarted: true, streamMode });
 });
 
 // ─── Graceful shutdown ───────────────────────────────────────────────────────
