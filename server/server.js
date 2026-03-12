@@ -504,6 +504,35 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// ─── API: Debug info ──────────────────────────────────────────────────────────
+app.get('/api/debug', (req, res) => {
+  const streamFiles = [];
+  try {
+    if (fs.existsSync(STREAM_DIR)) {
+      for (const f of fs.readdirSync(STREAM_DIR)) {
+        streamFiles.push(f);
+      }
+    }
+  } catch (e) { /* ignore */ }
+  res.json({
+    root: ROOT,
+    ffmpegPath: FFMPEG,
+    ffmpegExists: fs.existsSync(FFMPEG),
+    streamDir: STREAM_DIR,
+    streamDirExists: fs.existsSync(STREAM_DIR),
+    streamFiles,
+    logFile: LOG_FILE,
+    logFileExists: fs.existsSync(LOG_FILE),
+    logDirExists: fs.existsSync(path.dirname(LOG_FILE)),
+    cwd: process.cwd(),
+    dirname: __dirname,
+    env: {
+      USERNAME: process.env.USERNAME || process.env.USER || 'unknown',
+      USERPROFILE: process.env.USERPROFILE || 'unknown'
+    }
+  });
+});
+
 // ─── API: Set quality ────────────────────────────────────────────────────────
 app.post('/api/quality', express.json(), (req, res) => {
   const { quality } = req.body;
