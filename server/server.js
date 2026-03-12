@@ -556,11 +556,40 @@ app.post('/api/restart', (req, res) => {
   log('Restart requested via API');
   if (ffmpegProcess) {
     try { ffmpegProcess.kill('SIGTERM'); } catch (e) {}
-    // scheduleRestart will handle respawning
   } else {
     startCurrentMode();
   }
   res.json({ restarted: true, streamMode });
+});
+
+// ─── API: View recent logs ──────────────────────────────────────────────────
+app.get('/api/logs', (req, res) => {
+  const lines = parseInt(req.query.lines) || 50;
+  try {
+    const content = fs.readFileSync(LOG_FILE, 'utf8');
+    const all = content.trim().split('\n');
+    res.type('text/plain').send(all.slice(-lines).join('\n'));
+  } catch (e) {
+    res.type('text/plain').send('No logs found');
+  }
+});
+
+// ─── API: Git pull + self-restart ───────────────────────────────────────────
+app.post('/api/update', (req, res) => {
+  log('Update requested via API — pulling and restarting...');
+  try {
+    const pull = execSync('git pull', { cwd: ROOT, timeout: 30000 }).toString();
+    log('Git pull: ' + pull.trim());
+    res.json({ updated: true, output: pull.trim() });
+    // Restart the process after responding
+    setTimeout(() => {
+      log('Self-restarting after update...');
+      if (ffmpegProcess) try { ffmpegProcess.kill('SIGTERM'); } catch (e) {}
+      process.exit(0); // Task Scheduler or parent will restart us
+    }, 1000);
+  } catch (e) {
+    res.status(500).json({ updated: false, error: e.message });
+  }
 });
 
 // ─── Graceful shutdown ───────────────────────────────────────────────────────
