@@ -77,6 +77,56 @@ let currentQuality = '720p';
 // ─── Streaming mode ─────────────────────────────────────────────────────────
 let streamMode = 'hls'; // 'hls' or 'ws'
 
+// ─── Audio capture ──────────────────────────────────────────────────────────
+let audioEnabled = false;
+let audioDevice = null; // Auto-detected dshow audio device name
+
+function detectAudioDevices() {
+  try {
+    const output = execSync(
+      `"${FFMPEG}" -list_devices true -f dshow -i dummy 2>&1`,
+      { encoding: 'utf8', windowsHide: true, timeout: 10000 }
+    ).toString();
+    return parseAudioDevices(output);
+  } catch (e) {
+    // FFmpeg exits with error code when listing devices, output is in stderr/stdout
+    const output = e.stdout || e.stderr || (e.output ? e.output.join('') : '');
+    return parseAudioDevices(output);
+  }
+}
+
+function parseAudioDevices(output) {
+  const devices = [];
+  let inAudio = false;
+  for (const line of output.split('\n')) {
+    if (line.includes('DirectShow audio devices')) {
+      inAudio = true;
+      continue;
+    }
+    if (inAudio && line.includes('DirectShow video devices')) break;
+    if (inAudio) {
+      const match = line.match(/"([^"]+)"/);
+      if (match && !line.includes('Alternative name')) {
+        devices.push(match[1]);
+      }
+    }
+  }
+  return devices;
+}
+
+function autoSelectAudioDevice() {
+  const devices = detectAudioDevices();
+  log(`Audio devices found: ${devices.length ? devices.join(', ') : 'none'}`);
+  if (devices.length === 0) return null;
+  // Prefer Stereo Mix or loopback devices, then fall back to first available
+  const preferred = ['Stereo Mix', 'CABLE Output', 'What U Hear', 'Loopback'];
+  for (const pref of preferred) {
+    const found = devices.find(d => d.toLowerCase().includes(pref.toLowerCase()));
+    if (found) return found;
+  }
+  return devices[0];
+}
+
 // ─── WebSocket state ────────────────────────────────────────────────────────
 let wsClients = new Set();
 let initSegment = null; // Cached ftyp+moov for late joiners
@@ -112,7 +162,15 @@ function startFfmpeg() {
     '-f', 'gdigrab',
     '-framerate', '30',
     '-i', 'desktop',
-    '-an',
+  ];
+
+  // Add audio input if enabled and device available
+  if (audioEnabled && audioDevice) {
+    args.push('-f', 'dshow', '-i', `audio=${audioDevice}`);
+    log(`Audio capture: ${audioDevice}`);
+  }
+
+  args.push(
     '-vf', `scale=${preset.scale}`,
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
@@ -123,13 +181,22 @@ function startFfmpeg() {
     '-g', '30',
     '-keyint_min', '30',
     '-pix_fmt', 'yuv420p',
+  );
+
+  if (audioEnabled && audioDevice) {
+    args.push('-c:a', 'aac', '-b:a', '128k', '-ar', '44100');
+  } else {
+    args.push('-an');
+  }
+
+  args.push(
     '-f', 'hls',
     '-hls_time', '1',
     '-hls_list_size', '3',
     '-hls_flags', 'delete_segments+append_list',
     '-hls_segment_filename', path.join(STREAM_DIR, 'seg%03d.ts'),
     path.join(STREAM_DIR, 'screen.m3u8')
-  ];
+  );
 
   log('Starting FFmpeg...');
   ffmpegProcess = spawn(FFMPEG, args, {
@@ -185,7 +252,15 @@ function startFfmpegWs() {
     '-f', 'gdigrab',
     '-framerate', '30',
     '-i', 'desktop',
-    '-an',
+  ];
+
+  // Add audio input if enabled and device available
+  if (audioEnabled && audioDevice) {
+    args.push('-f', 'dshow', '-i', `audio=${audioDevice}`);
+    log(`[WS] Audio capture: ${audioDevice}`);
+  }
+
+  args.push(
     '-vf', `scale=${preset.scale}`,
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
@@ -196,11 +271,20 @@ function startFfmpegWs() {
     '-g', '30',
     '-keyint_min', '30',
     '-pix_fmt', 'yuv420p',
+  );
+
+  if (audioEnabled && audioDevice) {
+    args.push('-c:a', 'aac', '-b:a', '128k', '-ar', '44100');
+  } else {
+    args.push('-an');
+  }
+
+  args.push(
     '-f', 'mp4',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
     '-frag_duration', '1000000',
     'pipe:1'
-  ];
+  );
 
   log('[WS] Starting FFmpeg (fMP4 pipe mode)...');
   ffmpegProcess = spawn(FFMPEG, args, {
@@ -500,7 +584,9 @@ app.get('/api/status', (req, res) => {
     streamReady: streamMode === 'hls' ? hlsReady : wsReady,
     streamMode,
     quality: currentQuality,
-    wsClients: wsClients.size
+    wsClients: wsClients.size,
+    audio: audioEnabled,
+    audioDevice: audioDevice
   });
 });
 
@@ -578,6 +664,50 @@ app.post('/api/mode', express.json(), (req, res) => {
   }
 
   res.json({ streamMode, changed: true });
+});
+
+// ─── API: Audio devices ─────────────────────────────────────────────────────
+app.get('/api/audio/devices', (req, res) => {
+  const devices = detectAudioDevices();
+  res.json({ devices, current: audioDevice, enabled: audioEnabled });
+});
+
+// ─── API: Toggle audio ─────────────────────────────────────────────────────
+app.post('/api/audio', express.json(), (req, res) => {
+  const { enabled, device } = req.body;
+
+  if (typeof enabled === 'boolean') {
+    if (enabled && !audioDevice) {
+      // Try to auto-detect a device
+      audioDevice = autoSelectAudioDevice();
+      if (!audioDevice) {
+        return res.status(400).json({
+          error: 'No audio devices found. Enable "Stereo Mix" in Windows Sound settings or install a virtual audio cable.',
+          devices: detectAudioDevices()
+        });
+      }
+    }
+    audioEnabled = enabled;
+  }
+
+  if (device !== undefined) {
+    const devices = detectAudioDevices();
+    if (device && !devices.includes(device)) {
+      return res.status(400).json({ error: `Device not found: ${device}`, devices });
+    }
+    audioDevice = device || null;
+  }
+
+  log(`Audio ${audioEnabled ? 'enabled' : 'disabled'}${audioDevice ? ` (${audioDevice})` : ''} — restarting FFmpeg...`);
+
+  // Restart FFmpeg with new audio settings
+  if (ffmpegProcess) {
+    try { ffmpegProcess.kill('SIGTERM'); } catch (e) {}
+  } else {
+    startCurrentMode();
+  }
+
+  res.json({ enabled: audioEnabled, device: audioDevice, changed: true });
 });
 
 // ─── API: Restart FFmpeg ─────────────────────────────────────────────────────
@@ -665,6 +795,14 @@ setInterval(() => {
 // ─── Start ───────────────────────────────────────────────────────────────────
 log('=== ServerPages starting ===');
 killOrphanedFfmpeg();
+
+// Auto-detect audio device at startup
+audioDevice = autoSelectAudioDevice();
+if (audioDevice) {
+  log(`Audio device detected: ${audioDevice} (audio disabled by default, enable via API)`);
+} else {
+  log('No audio capture device detected. Enable "Stereo Mix" in Windows Sound settings to capture system audio.');
+}
 
 const server = http.createServer(app);
 

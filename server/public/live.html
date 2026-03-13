@@ -124,6 +124,14 @@
         <button class="toggle-btn" data-mode="ws" onclick="switchMode('ws')">Low Latency</button>
       </div>
 
+      <div class="toggle-group">
+        <button class="toggle-btn" id="audioToggle" onclick="toggleAudio()">Audio: OFF</button>
+      </div>
+
+      <div class="toggle-group">
+        <button class="toggle-btn" id="muteToggle" onclick="toggleMute()">Unmute</button>
+      </div>
+
       <div class="toggle-group right">
         <button class="toggle-btn" data-quality="720p" onclick="setQuality('720p')">720p</button>
         <button class="toggle-btn" data-quality="1080p" onclick="setQuality('1080p')">1080p</button>
@@ -149,6 +157,7 @@
     let pendingBuffers = [];
     let canPlayHandler = null;
     let currentMode = 'hls';
+    let serverAudioEnabled = false;
     let retryTimeout = null;
     let retryDelay = 5000;
     const MAX_RETRY_DELAY = 15000;
@@ -198,6 +207,7 @@
 
         updateModeButtons(data.streamMode || 'hls');
         updateQualityButtons(data.quality);
+        updateAudioState(data.audio, data.audioDevice);
         currentMode = data.streamMode || 'hls';
 
         if (data.uptime) updateUptime(data.uptime);
@@ -322,7 +332,10 @@
 
       mediaSource.addEventListener('sourceopen', () => {
         try {
-          sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42C01F"');
+          const codec = serverAudioEnabled
+            ? 'video/mp4; codecs="avc1.42C01F, mp4a.40.2"'
+            : 'video/mp4; codecs="avc1.42C01F"';
+          sourceBuffer = mediaSource.addSourceBuffer(codec);
           sourceBuffer.mode = 'sequence';
           msReady = true;
 
@@ -527,6 +540,54 @@
       btns.forEach(b => b.disabled = false);
     }
 
+    // ── Audio controls ─────────────────────────────────────────────────────
+    function updateAudioState(enabled, device) {
+      serverAudioEnabled = !!enabled;
+      const btn = document.getElementById('audioToggle');
+      btn.textContent = enabled ? `Audio: ON` : 'Audio: OFF';
+      btn.classList.toggle('active', !!enabled);
+      btn.title = device || 'No audio device';
+    }
+
+    function toggleMute() {
+      video.muted = !video.muted;
+      const btn = document.getElementById('muteToggle');
+      btn.textContent = video.muted ? 'Unmute' : 'Mute';
+      btn.classList.toggle('active', !video.muted);
+    }
+
+    async function toggleAudio() {
+      const btn = document.getElementById('audioToggle');
+      btn.disabled = true;
+      const newState = !serverAudioEnabled;
+
+      try {
+        const res = await fetch('/api/audio', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: newState })
+        });
+        const data = await res.json();
+        if (data.error) {
+          alert(data.error);
+        } else {
+          updateAudioState(data.enabled, data.device);
+          if (data.changed) {
+            // Tear down current player — FFmpeg restarting with new config
+            destroyHls();
+            destroyWs();
+            setLive(false);
+            showOverlay(newState ? 'Enabling audio...' : 'Disabling audio...');
+            clearTimeout(retryTimeout);
+            setTimeout(checkAndConnect, 3500);
+          }
+        }
+      } catch (e) {
+        alert('Failed to toggle audio');
+      }
+      btn.disabled = false;
+    }
+
     // ── Periodic status ──────────────────────────────────────────────────────
     function updateUptime(secs) {
       const mins = Math.floor(secs / 60);
@@ -542,6 +603,7 @@
         if (data.uptime) updateUptime(data.uptime);
         if (data.quality) updateQualityButtons(data.quality);
         if (data.streamMode) updateModeButtons(data.streamMode);
+        updateAudioState(data.audio, data.audioDevice);
       } catch (e) {}
     }
 
