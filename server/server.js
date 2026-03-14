@@ -85,20 +85,29 @@ function detectAudioDevices() {
   try {
     const output = execSync(
       `"${FFMPEG}" -list_devices true -f dshow -i dummy 2>&1`,
-      { encoding: 'utf8', windowsHide: true, timeout: 10000 }
-    ).toString();
+      { encoding: 'utf8', windowsHide: true, timeout: 10000, shell: true }
+    );
     return parseAudioDevices(output);
   } catch (e) {
-    // FFmpeg exits with error code when listing devices, output is in stderr/stdout
-    const output = e.stdout || e.stderr || (e.output ? e.output.join('') : '');
+    // FFmpeg always exits with error when listing devices — output is in stdout due to 2>&1
+    const output = e.stdout || e.stderr || '';
     return parseAudioDevices(output);
   }
 }
 
 function parseAudioDevices(output) {
   const devices = [];
+  // Modern FFmpeg format: "Device Name" (audio)
+  // Older FFmpeg format: [dshow] "Device Name" under "DirectShow audio devices" section
   let inAudio = false;
   for (const line of output.split('\n')) {
+    // Check for (audio) tag — modern format
+    if (line.includes('(audio)')) {
+      const match = line.match(/"([^"]+)"/);
+      if (match) devices.push(match[1]);
+      continue;
+    }
+    // Fallback: section-based parsing for older FFmpeg
     if (line.includes('DirectShow audio devices')) {
       inAudio = true;
       continue;
